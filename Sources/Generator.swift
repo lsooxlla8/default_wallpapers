@@ -126,7 +126,7 @@ final class Generator: NSObject, NSMenuDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); self.item = item
         item.button?.image = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Wallpaper Generator")
         item.button?.toolTip = "Wallpaper Generator"
-        let menu = NSMenu(); menu.delegate = self; self.menu = menu; item.menu = menu
+        let menu = NSMenu(); menu.autoenablesItems = false; menu.delegate = self; self.menu = menu; item.menu = menu
         menu.addItem(withTitle: "Сгенерировать обои", action: #selector(generateAll), keyEquivalent: "g")
         menu.addItem(withTitle: "Сохранить скетч + PNG", action: #selector(save), keyEquivalent: "s")
         menu.addItem(.separator())
@@ -164,7 +164,11 @@ final class Generator: NSObject, NSMenuDelegate {
         guard !busy else { return }
         let list = targets(NSScreen.screens); guard !list.isEmpty else { return }
         busy = true; controls.setEnabled(false)
-        PhotoSource.sample(settings: settings) { [weak self] photos in self?.render(list, base: UInt32.random(in: 1...UInt32.max), palette: nil, keep: [], photos: photos) }
+        PhotoSource.sample(settings: settings) { [weak self] photos, error in
+            guard let self else { return }
+            if let error { self.busy = false; self.controls.setEnabled(true); self.report(error); return }
+            self.render(list, base: UInt32.random(in: 1...UInt32.max), palette: nil, keep: [], photos: photos)
+        }
     }
     private func updateScreens() {
         guard !busy else { return }

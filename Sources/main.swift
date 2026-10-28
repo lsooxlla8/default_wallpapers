@@ -19,6 +19,7 @@ if let i = arguments.firstIndex(of: "--preview-settings"), arguments.count > i +
     let preferences = SettingsWindow(Settings()) { _ in nil }; preferences.show()
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
         guard let view = NSApp.windows.first(where: { $0.title.contains("Настройки") })?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+        view.layoutSubtreeIfNeeded(); view.display()
         view.cacheDisplay(in: view.bounds, to: rep)
         try! rep.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent("settings-macos.png"))
         _ = preferences; exit(0)

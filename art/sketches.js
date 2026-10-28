@@ -73,7 +73,9 @@
     // Experimental raster families: the bitmap is built once here. A photo is
     // taken from the pool the host supplied; its id is kept in the record.
     if(rasterSpec){
-      const pool=DesktopExperiments.photos(),chosen=photo?pool.find(p=>p.id===photo):pool.length?pool[Math.floor(rng(G.mix32(record.seed,0xf070))()*pool.length)]:null;
+      const usesPhoto=DesktopExperiments.catalogue.find(r=>r.id===rasterSpec.rule)?.source==="photo";
+      if(!usesPhoto)photo=null;
+      const pool=DesktopExperiments.photos(),chosen=usesPhoto?(photo?pool.find(p=>p.id===photo):pool.length?pool[Math.floor(rng(G.mix32(record.seed,0xf070))()*pool.length)]:null):null;
       if(!photo&&chosen)photo=chosen.id;
       const sources=families.filter(f=>!f.startsWith("glitch-")&&!G.HEAVY.includes(f));
       raster=DesktopExperiments.build({...rasterSpec,size:record.rasterSize||560},{aspect:A,palette,paletteMode,photo:()=>chosen,pickFamily:Rr=>sources[Math.floor(Rr(0,sources.length))]});

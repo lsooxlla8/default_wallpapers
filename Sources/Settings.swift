@@ -44,6 +44,11 @@ final class Hotkey {
     deinit { if let reference { UnregisterEventHotKey(reference) }; if let handler { RemoveEventHandler(handler) } }
 }
 
+final class SettingsCanvas: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); bounds.fill() }
+}
+
 final class SettingsWindow: NSObject, NSWindowDelegate {
     private var window: NSWindow!
     private let frequency = NSPopUpButton()
@@ -61,27 +66,31 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         super.init()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 510), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Wallpaper Generator — Настройки"; window.isReleasedWhenClosed = false; window.delegate = self
-        let root = NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing = 8
-        root.translatesAutoresizingMaskIntoConstraints = false; window.contentView!.addSubview(root)
-        NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 24), root.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -24), root.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 24)])
-        func row(_ label: String, _ controls: [NSView]) {
-            let title = NSTextField(labelWithString: label); title.font = .boldSystemFont(ofSize: 13)
-            root.addArrangedSubview(title)
-            let line = NSStackView(views: controls); line.orientation = .horizontal; line.spacing = 8; root.addArrangedSubview(line)
-        }
+        window.appearance = NSAppearance(named: .darkAqua)
+        let root = SettingsCanvas(frame: NSRect(x: 0, y: 0, width: 520, height: 510))
+        window.contentView = root
+        func add(_ view: NSView, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) { view.frame = NSRect(x: x, y: y, width: w, height: h); root.addSubview(view) }
+        func title(_ text: String, _ y: CGFloat) { let label = NSTextField(labelWithString: text); label.font = .boldSystemFont(ofSize: 13); add(label, 24, y, 472, 20) }
+        title("Смена обоев", 24)
         frequency.addItems(withTitles: ["Только вручную", "Каждую минуту", "Каждые 5 минут", "Каждые 15 минут", "Каждые 30 минут", "Каждый час", "Каждые 2 часа", "Каждые 6 часов", "Каждые 12 часов", "Каждый день"])
         frequency.selectItem(at: Settings.intervals.firstIndex(of: settings.intervalMinutes) ?? 5); frequency.target = self; frequency.action = #selector(edit)
-        row("Смена обоев", [frequency])
+        add(frequency, 24, 47, 230, 28)
+        title("Источник фотографий", 96)
         source.addItems(withTitles: ["Системная фототека", "Выбранная папка", "Без фотографий"])
         source.selectItem(at: ["system", "folder", "none"].firstIndex(of: settings.photoSource) ?? 0); source.target = self; source.action = #selector(edit)
-        let choosePhotos = NSButton(title: "Выбрать папку…", target: self, action: #selector(choosePhotoFolder))
-        row("Источник фотографий", [source, choosePhotos]); root.addArrangedSubview(NSButton(title: "Разрешить доступ к Фото…", target: self, action: #selector(connectPhotos))); photoPath.lineBreakMode = .byTruncatingMiddle; root.addArrangedSubview(photoPath)
-        let chooseSave = NSButton(title: "Выбрать папку…", target: self, action: #selector(chooseSaveFolder))
-        row("Сохранять работы в", [chooseSave, savePath]); savePath.lineBreakMode = .byTruncatingMiddle
-        buttons.state = settings.desktopButtons ? .on : .off; buttons.target = self; buttons.action = #selector(edit); root.addArrangedSubview(buttons)
-        shortcut.target = self; shortcut.action = #selector(recordShortcut)
-        row("Шорткат генерации", [shortcut, NSButton(title: "Отключить", target: self, action: #selector(clearShortcut))])
-        status.font = .systemFont(ofSize: 11); root.addArrangedSubview(status)
+        add(source, 24, 119, 230, 28)
+        add(NSButton(title: "Выбрать папку…", target: self, action: #selector(choosePhotoFolder)), 266, 119, 230, 28)
+        add(NSButton(title: "Разрешить доступ к Фото…", target: self, action: #selector(connectPhotos)), 24, 154, 230, 28)
+        photoPath.lineBreakMode = .byTruncatingMiddle; photoPath.font = .systemFont(ofSize: 11); add(photoPath, 24, 188, 472, 30)
+        title("Сохранять работы в", 231)
+        add(NSButton(title: "Выбрать папку…", target: self, action: #selector(chooseSaveFolder)), 24, 254, 160, 28)
+        savePath.lineBreakMode = .byTruncatingMiddle; savePath.font = .systemFont(ofSize: 11); add(savePath, 196, 259, 300, 20)
+        buttons.state = settings.desktopButtons ? .on : .off; buttons.target = self; buttons.action = #selector(edit); add(buttons, 24, 305, 472, 24)
+        let hint = NSTextField(labelWithString: "Меню трея доступно всегда — кнопки дополняют его."); hint.font = .systemFont(ofSize: 11); add(hint, 24, 334, 472, 20)
+        title("Шорткат генерации", 377)
+        shortcut.target = self; shortcut.action = #selector(recordShortcut); add(shortcut, 24, 400, 300, 28)
+        add(NSButton(title: "Отключить", target: self, action: #selector(clearShortcut)), 336, 400, 160, 28)
+        status.font = .systemFont(ofSize: 11); add(status, 24, 449, 472, 40)
         updateLabels(); window.center()
     }
     func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
