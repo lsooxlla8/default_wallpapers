@@ -64,7 +64,10 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
         window.title = "default_wallpaper"; window.isReleasedWhenClosed = false; window.contentView = web; window.center()
         web.loadFileURL(page, allowingReadAccessTo: Bundle.main.resourceURL!)
     }
-    func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func show() {
+        if CommandLine.arguments.contains("--preview-settings"), let screen=NSScreen.main { window.setFrameTopLeftPoint(NSPoint(x:32,y:screen.frame.maxY-32)) }
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
     private func state() -> [String: Any] {
         let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         window.setContentSize(NSSize(width: 560, height: 292 + (settings.photoSource == "folder" ? 22 : 0) + (error.isEmpty ? 0 : 44)))

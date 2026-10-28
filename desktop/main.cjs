@@ -188,7 +188,7 @@ async function smokeTest() {
     if (result.png !== photoFrame.png) throw Error('Photo export pixels differ from original');
   } finally { exported.destroy(); }
   checkpoint('settings UI and IPC');
-  showSettings();
+  showSettings(); preferencesWindow.setPosition(32,32);
   if (preferencesWindow.webContents.isLoading()) await new Promise(resolve => preferencesWindow.webContents.once('did-finish-load', resolve));
   const settingsViaUI = await preferencesWindow.webContents.executeJavaScript(`(async()=>{
     await new Promise(r=>setTimeout(r,100));
