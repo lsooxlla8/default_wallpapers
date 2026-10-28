@@ -32,11 +32,19 @@ public static class WallpaperAPI {
  }
  public static IWallpaper Open() { return (IWallpaper)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("C2CF3110-460E-4FC1-B9D0-8A1C0C9CC4BD"))); }
 }
+public sealed class WallpaperSession : IDisposable {
+ private readonly IWallpaper api=WallpaperAPI.Open();
+ public uint GetMonitorDevicePathCount(){return api.GetMonitorDevicePathCount();}
+ public string GetMonitorDevicePathAt(uint index){return api.GetMonitorDevicePathAt(index);}
+ public MonitorRect GetMonitorRECT(string id){return api.GetMonitorRECT(id);}
+ public void SetWallpaper(string id,string file){api.SetWallpaper(id,file);}
+ public void Dispose(){Marshal.ReleaseComObject(api);}
+}
 '@
 if ($CheckOnly) { Write-Output 'Windows COM helper compiled'; exit 0 }
 if ($WindowHandle -ne 0) { [WallpaperAPI]::Lower($WindowHandle); exit 0 }
 $items = @(Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json)
-$api = [WallpaperAPI]::Open()
+$api = New-Object WallpaperSession
 try {
  for ($i = 0; $i -lt $api.GetMonitorDevicePathCount(); $i++) {
   $id = $api.GetMonitorDevicePathAt($i)
@@ -47,4 +55,4 @@ try {
   if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw 'Wallpaper file is missing' }
   $api.SetWallpaper($id, $file)
  }
-} finally { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($api) }
+} finally { $api.Dispose() }
