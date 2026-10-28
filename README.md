@@ -1,6 +1,6 @@
 # default_wallpapers
 
-**Wallpaper Generator** creates procedural wallpapers, sets them as the system
+**default_wallpaper** creates procedural wallpapers, sets them as the system
 background, and exports the original animated p5.js sketch. A standalone app
 without widgets, Obsidian, Telegram, accounts or network access.
 
@@ -74,8 +74,8 @@ photo export replay in Chromium. Windows CI also applies an image through the
 actual wallpaper COM API. No CI result proves your physical monitor layout,
 keyboard/compositor behavior, or macOS Photos permission flow.
 
-Runtime data: macOS `~/Library/Application Support/audio.default.wallpaper-generator`;
-Windows/Linux use Electron's per-user `Wallpaper Generator` data directory.
+Runtime data: macOS `~/Library/Application Support/audio.default.wallpaper`;
+Windows/Linux use Electron's per-user `default_wallpaper` data directory.
 Uninstallation does not remove exported projects. No `default_desktop` data is migrated.
 
 ## Engine and licenses

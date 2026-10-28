@@ -1,5 +1,9 @@
 # Third-party software
 
+- JetBrains Mono Medium and ExtraBold (unmodified WOFF2): SIL Open Font License 1.1;
+  see `assets/fonts/OFL.txt`. Source: https://github.com/JetBrains/JetBrainsMono
+
+
 - `art/p5.min.js`: p5.js 2.3.4, LGPL-2.1; full license at `art/p5-LICENSE.txt`.
   Project and source: https://github.com/processing/p5.js/tree/v2.3.4
   The unmodified library remains a separate replaceable file, including in exports.

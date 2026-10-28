@@ -1,11 +1,13 @@
 import AppKit
 import Carbon
+import Photos
+import WebKit
 
 struct Settings: Codable {
     var intervalMinutes: Int = 60
     var photoSource: String = "system"
     var photoFolder: String = ""
-    var saveFolder: String = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Wallpaper Generator").path
+    var saveFolder: String = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/default_wallpaper").path
     var desktopButtons: Bool = false
     var shortcutKey: Int = -1
     var shortcutModifiers: UInt32 = 0
@@ -44,91 +46,89 @@ final class Hotkey {
     deinit { if let reference { UnregisterEventHotKey(reference) }; if let handler { RemoveEventHandler(handler) } }
 }
 
-final class SettingsCanvas: NSView {
-    override var isFlipped: Bool { true }
-    override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); bounds.fill() }
-}
-
-final class SettingsWindow: NSObject, NSWindowDelegate {
+// AppKit owns the window, Photos permissions, folder dialogs and Carbon hotkey.
+// The compact settings surface is shared with the other platforms through WebKit.
+final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     private var window: NSWindow!
-    private let frequency = NSPopUpButton()
-    private let source = NSPopUpButton()
-    private let photoPath = NSTextField(labelWithString: "")
-    private let savePath = NSTextField(labelWithString: "")
-    private let status = NSTextField(wrappingLabelWithString: "")
-    private let buttons = NSButton(checkboxWithTitle: "Показывать кнопки на рабочем столе", target: nil, action: nil)
-    private let shortcut = NSButton(title: "Назначить…", target: nil, action: nil)
-    private var monitor: Any?
+    private var web: WKWebView!
     private var settings: Settings
+    private var error = ""
     private let changed: (Settings) -> String?
+    private let page = Bundle.main.resourceURL!.appendingPathComponent("desktop/settings.html")
+    private static let keys: [String: Int] = ["A":0,"S":1,"D":2,"F":3,"H":4,"G":5,"Z":6,"X":7,"C":8,"V":9,"B":11,"Q":12,"W":13,"E":14,"R":15,"Y":16,"T":17,"1":18,"2":19,"3":20,"4":21,"6":22,"5":23,"9":25,"7":26,"8":28,"0":29,"O":31,"U":32,"I":34,"P":35,"L":37,"J":38,"K":40,"N":45,"M":46,"Space":49,"F1":122,"F2":120,"F3":99,"F4":118,"F5":96,"F6":97,"F7":98,"F8":100,"F9":101,"F10":109,"F11":103,"F12":111,"F13":105,"F14":107,"F15":113,"F16":106,"F17":64,"F18":79,"F19":80,"F20":90]
     init(_ settings: Settings, changed: @escaping (Settings) -> String?) {
-        self.settings = settings; self.changed = changed
-        super.init()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 510), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Wallpaper Generator — Настройки"; window.isReleasedWhenClosed = false; window.delegate = self
-        window.appearance = NSAppearance(named: .darkAqua)
-        let root = SettingsCanvas(frame: NSRect(x: 0, y: 0, width: 520, height: 510))
-        window.contentView = root
-        func add(_ view: NSView, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) { view.frame = NSRect(x: x, y: y, width: w, height: h); root.addSubview(view) }
-        func title(_ text: String, _ y: CGFloat) { let label = NSTextField(labelWithString: text); label.font = .boldSystemFont(ofSize: 13); add(label, 24, y, 472, 20) }
-        title("Смена обоев", 24)
-        frequency.addItems(withTitles: ["Только вручную", "Каждую минуту", "Каждые 5 минут", "Каждые 15 минут", "Каждые 30 минут", "Каждый час", "Каждые 2 часа", "Каждые 6 часов", "Каждые 12 часов", "Каждый день"])
-        frequency.selectItem(at: Settings.intervals.firstIndex(of: settings.intervalMinutes) ?? 5); frequency.target = self; frequency.action = #selector(edit)
-        add(frequency, 24, 47, 230, 28)
-        title("Источник фотографий", 96)
-        source.addItems(withTitles: ["Системная фототека", "Выбранная папка", "Без фотографий"])
-        source.selectItem(at: ["system", "folder", "none"].firstIndex(of: settings.photoSource) ?? 0); source.target = self; source.action = #selector(edit)
-        add(source, 24, 119, 230, 28)
-        add(NSButton(title: "Выбрать папку…", target: self, action: #selector(choosePhotoFolder)), 266, 119, 230, 28)
-        add(NSButton(title: "Разрешить доступ к Фото…", target: self, action: #selector(connectPhotos)), 24, 154, 230, 28)
-        photoPath.lineBreakMode = .byTruncatingMiddle; photoPath.font = .systemFont(ofSize: 11); add(photoPath, 24, 188, 472, 30)
-        title("Сохранять работы в", 231)
-        add(NSButton(title: "Выбрать папку…", target: self, action: #selector(chooseSaveFolder)), 24, 254, 160, 28)
-        savePath.lineBreakMode = .byTruncatingMiddle; savePath.font = .systemFont(ofSize: 11); add(savePath, 196, 259, 300, 20)
-        buttons.state = settings.desktopButtons ? .on : .off; buttons.target = self; buttons.action = #selector(edit); add(buttons, 24, 305, 472, 24)
-        let hint = NSTextField(labelWithString: "Меню трея доступно всегда — кнопки дополняют его."); hint.font = .systemFont(ofSize: 11); add(hint, 24, 334, 472, 20)
-        title("Шорткат генерации", 377)
-        shortcut.target = self; shortcut.action = #selector(recordShortcut); add(shortcut, 24, 400, 300, 28)
-        add(NSButton(title: "Отключить", target: self, action: #selector(clearShortcut)), 336, 400, 160, 28)
-        status.font = .systemFont(ofSize: 11); add(status, 24, 449, 472, 40)
-        updateLabels(); window.center()
+        self.settings = settings; self.changed = changed; super.init()
+        let config = WKWebViewConfiguration(); config.websiteDataStore = .nonPersistent(); config.userContentController.add(self, name: "settings")
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: 560, height: 292), configuration: config); web.navigationDelegate = self
+        window = NSWindow(contentRect: web.frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "default_wallpaper"; window.isReleasedWhenClosed = false; window.contentView = web; window.center()
+        web.loadFileURL(page, allowingReadAccessTo: Bundle.main.resourceURL!)
     }
     func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    private func updateLabels() {
-        photoPath.stringValue = settings.photoSource == "folder" ? (settings.photoFolder.isEmpty ? "Папка не выбрана" : settings.photoFolder) : (settings.photoSource == "system" ? "Доступ к Фото запрашивается только после выбора этого источника." : "Только процедурная графика")
-        savePath.stringValue = settings.saveFolder
-        shortcut.title = settings.shortcutKey < 0 ? "Назначить…" : settings.shortcutLabel
+    private func state() -> [String: Any] {
+        let auth = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        window.setContentSize(NSSize(width: 560, height: 292 + (settings.photoSource == "folder" ? 22 : 0) + (error.isEmpty ? 0 : 44)))
+        return ["platform": "darwin", "photoAccess": auth == .authorized || auth == .limited, "error": error,
+                "settings": ["intervalMinutes": settings.intervalMinutes, "photoSource": settings.photoSource, "photoFolder": settings.photoFolder, "saveFolder": settings.saveFolder, "desktopButtons": settings.desktopButtons, "shortcut": settings.shortcutKey < 0 ? "" : settings.shortcutLabel]]
     }
-    private func persist() { status.stringValue = changed(settings) ?? "Сохранено"; updateLabels() }
-    @objc private func connectPhotos() { PhotoSource.requestAccess { [weak self] allowed in self?.status.stringValue = allowed ? "Доступ к Фото разрешён" : "Нет доступа к Фото. Разрешите его в настройках macOS или выберите папку." } }
-    @objc private func edit() {
-        let previous = settings.photoSource
-        settings.intervalMinutes = Settings.intervals[frequency.indexOfSelectedItem]
-        settings.photoSource = ["system", "folder", "none"][source.indexOfSelectedItem]
-        settings.desktopButtons = buttons.state == .on
-        persist()
-        if settings.photoSource == "system" && previous != "system" { PhotoSource.requestAccess { [weak self] allowed in self?.status.stringValue = allowed ? "Системная фототека подключена" : "Нет доступа к Фото. Разрешите его в настройках macOS или выберите папку." } }
+    private func reply(_ id: Int, error: String? = nil) {
+        if let error { self.error = error }
+        web.callAsyncJavaScript("window.nativeReply(id,value,error)", arguments: ["id": id, "value": state(), "error": error as Any? ?? NSNull()], in: nil, in: .page) { _ in }
     }
-    private func chooseFolder(_ done: @escaping (URL) -> Void) {
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false
-        panel.beginSheetModal(for: window) { result in if result == .OK, let url = panel.url { done(url) } }
+    private func commit(_ next: Settings, id: Int) {
+        if let message = changed(next) { reply(id, error: message); return }
+        settings = next; error = ""; reply(id)
     }
-    @objc private func choosePhotoFolder() { chooseFolder { [weak self] url in guard let self else { return }; self.settings.photoFolder = url.path; self.settings.photoSource = "folder"; self.source.selectItem(at: 1); self.persist() } }
-    @objc private func chooseSaveFolder() { chooseFolder { [weak self] url in guard let self else { return }; self.settings.saveFolder = url.path; self.persist() } }
-    @objc private func clearShortcut() { stopRecording(); settings.shortcutKey = -1; settings.shortcutModifiers = 0; settings.shortcutLabel = ""; persist() }
-    private func stopRecording() { if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }; updateLabels() }
-    func windowWillClose(_ notification: Notification) { stopRecording() }
-    @objc private func recordShortcut() {
-        stopRecording(); shortcut.title = "Нажмите комбинацию… (Esc — отмена)"
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            if event.keyCode == 53 { self.stopRecording(); return nil }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard !flags.intersection([.command, .control, .option]).isEmpty, let key = event.charactersIgnoringModifiers?.uppercased(), !key.isEmpty else { self.status.stringValue = "Добавьте ⌘, ⌃ или ⌥ к клавише"; return nil }
-            self.settings.shortcutKey = Int(event.keyCode)
-            self.settings.shortcutModifiers = (flags.contains(.command) ? UInt32(cmdKey) : 0) | (flags.contains(.control) ? UInt32(controlKey) : 0) | (flags.contains(.option) ? UInt32(optionKey) : 0) | (flags.contains(.shift) ? UInt32(shiftKey) : 0)
-            self.settings.shortcutLabel = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "") + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "") + key
-            self.stopRecording(); self.persist(); return nil
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, message.webView === web, message.frameInfo.request.url == page,
+              let body = message.body as? [String: Any], let id = (body["id"] as? NSNumber)?.intValue, let operation = body["operation"] as? String else { return }
+        switch operation {
+        case "state": reply(id)
+        case "settings":
+            guard let value = body["value"] as? [String: Any], let interval = value["intervalMinutes"] as? Int, Settings.intervals.contains(interval), let source = value["photoSource"] as? String, ["system", "folder", "none"].contains(source), let desktop = value["desktopButtons"] as? Bool, let shortcut = value["shortcut"] as? String else { reply(id, error: "Invalid settings"); return }
+            var next = settings; next.intervalMinutes = interval; next.photoSource = source; next.desktopButtons = desktop
+            if shortcut.isEmpty { next.shortcutKey = -1; next.shortcutModifiers = 0; next.shortcutLabel = "" }
+            else {
+                let parts = shortcut.split(separator: "+").map(String.init)
+                guard let last = parts.last, let key = Self.keys[last], parts.count > 1, parts.dropLast().allSatisfy({ ["Control", "Alt", "Super", "Shift"].contains($0) }), parts.contains(where: { ["Control", "Alt", "Super"].contains($0) }) else { reply(id, error: "Use Control / Alt / Command + a key"); return }
+                next.shortcutKey = key; next.shortcutLabel = shortcut
+                next.shortcutModifiers = (parts.contains("Control") ? UInt32(controlKey) : 0) | (parts.contains("Alt") ? UInt32(optionKey) : 0) | (parts.contains("Super") ? UInt32(cmdKey) : 0) | (parts.contains("Shift") ? UInt32(shiftKey) : 0)
+            }
+            commit(next, id: id)
+        case "choose":
+            guard let kind = body["value"] as? String, ["photo", "save"].contains(kind) else { reply(id, error: "Unknown folder type"); return }
+            let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false
+            panel.beginSheetModal(for: window) { [weak self] response in
+                guard let self else { return }
+                if response == .OK, let url = panel.url { var next = self.settings; if kind == "photo" { next.photoFolder = url.path; next.photoSource = "folder" } else { next.saveFolder = url.path }; self.commit(next, id: id) }
+                else { self.reply(id) }
+            }
+        case "connect":
+            PhotoSource.requestAccess { [weak self] allowed in self?.error = allowed ? "" : "Photos access denied"; self?.reply(id) }
+        default: reply(id, error: "Unknown action")
+        }
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        decisionHandler(navigationAction.request.url == page && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
+    }
+    func verifyUI(completion: @escaping (Bool) -> Void) {
+        let script = """
+        await document.fonts.ready;
+        for(let i=0;i<100&&!window.wallpapers;i++)await new Promise(r=>setTimeout(r,20));
+        const initial=await wallpapers.state();
+        await wallpapers.update({...initial.settings,intervalMinutes:15,desktopButtons:true,shortcut:'Control+Alt+G'});
+        const value=await wallpapers.state();
+        const valid=value.settings.intervalMinutes===15&&value.settings.desktopButtons&&value.settings.shortcut==='Control+Alt+G';
+        await wallpapers.update({...initial.settings});return valid;
+        """
+        web.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { result in completion((try? result.get() as? Bool) == true) }
+    }
+    func capture(to url: URL, completion: @escaping (Bool) -> Void) {
+        web.callAsyncJavaScript("await document.fonts.ready;return !!document.querySelector('.selector-face');", arguments: [:], in: nil, in: .page) { [weak self] _ in
+            self?.web.takeSnapshot(with: nil) { image, _ in
+                guard let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let data = rep.representation(using: .png, properties: [:]) else { completion(false); return }
+                do { try data.write(to: url); completion(true) } catch { completion(false) }
+            }
         }
     }
 }

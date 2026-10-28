@@ -1,6 +1,6 @@
 {
   "name": "default-wallpapers",
-  "productName": "Wallpaper Generator",
+  "productName": "default_wallpaper",
   "version": "1.0.0",
   "description": "Offline generative wallpapers with a tray menu, photo sources and source export",
   "author": {
@@ -22,12 +22,12 @@
     "electron-builder": "26.18.0"
   },
   "build": {
-    "appId": "audio.default.wallpaper-generator",
+    "appId": "audio.default.wallpaper",
     "asar": true,
     "files": [
       "desktop/**/*",
       "art/**/*",
-      "assets/icon.png",
+      "assets/**/*",
       "package.json",
       "THIRD_PARTY_NOTICES.md"
     ],
@@ -59,7 +59,7 @@
       "artifactName": "default_wallpapers-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "Wallpaper Generator",
+          "Name": "default_wallpaper",
           "Comment": "Generate wallpapers and manage photo sources"
         }
       }

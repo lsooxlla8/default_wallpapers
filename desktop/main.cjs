@@ -11,27 +11,28 @@ const smoke = process.argv.includes('--smoke-test');
 const qaArg = process.argv.indexOf('--smoke-out');
 const qa = qaArg >= 0 ? path.resolve(process.argv[qaArg + 1]) : path.join(root, 'qa');
 if (smoke) app.setPath('userData', path.join(qa, 'app-data'));
-app.setName('Wallpaper Generator');
+app.setName('default_wallpaper');
 let prefs, current, tray, preferencesWindow, controlWindow, timer, busy = false, error = '', status = '', pendingRefresh = false;
 const windows = new Set();
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
 const currentFile = () => path.join(app.getPath('userData'), 'current.json');
 const readJSON = async file => { try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return null; } };
-const state = () => ({settings: prefs, pictures: app.getPath('pictures'), busy, hasWork: Boolean(current?.works?.length), error, status});
+const state = () => ({platform: process.platform, settings: prefs, pictures: app.getPath('pictures'), busy, hasWork: Boolean(current?.works?.length), error, status});
 function publish() {
+  if(preferencesWindow&&!preferencesWindow.isDestroyed())preferencesWindow.setContentSize(560,292+(prefs.photoSource==='folder'?22:0)+(error?44:0));
   for (const win of windows) if (!win.isDestroyed()) win.webContents.send('changed', state());
   if (tray) tray.setContextMenu(Menu.buildFromTemplate([
-    {label: busy ? 'Генерация…' : 'Сгенерировать обои', enabled: !busy, click: () => safely(generate())},
-    {label: 'Сохранить скетч + PNG', enabled: !busy && Boolean(current?.works?.length), click: () => safely(save())},
-    {type: 'separator'}, {label: 'Настройки…', click: showSettings},
-    {label: 'Открыть папку сохранения', click: () => safely(openFolder())},
-    {label: error || 'Wallpaper Generator ' + app.getVersion(), enabled: false},
-    {type: 'separator'}, {label: 'Выйти', click: () => app.quit()}
+    {label: busy ? 'Generating…' : 'Generate', enabled: !busy, click: () => safely(generate())},
+    {label: 'Save sketch + PNG', enabled: !busy && Boolean(current?.works?.length), click: () => safely(save())},
+    {type: 'separator'}, {label: 'Settings…', click: showSettings},
+    {label: 'Open export folder', click: () => safely(openFolder())},
+    ...(error ? [{label: error, enabled: false}] : []),
+    {type: 'separator'}, {label: 'Quit', click: () => app.quit()}
   ]));
 }
 function safely(promise) { promise.catch(e => { error = e.message; publish(); }); }
 function secureWindow(options) {
-  const win = new BrowserWindow({...options, webPreferences: {contextIsolation: true, sandbox: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.cjs')}});
+  const win = new BrowserWindow({...options, webPreferences: {contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs')}});
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   win.webContents.on('will-navigate', e => e.preventDefault());
@@ -39,7 +40,7 @@ function secureWindow(options) {
 }
 function showSettings() {
   if (!preferencesWindow || preferencesWindow.isDestroyed()) {
-    preferencesWindow = secureWindow({width: 600, height: 800, minWidth: 560, minHeight: 760, title: 'Wallpaper Generator — Настройки', backgroundColor: '#111111', autoHideMenuBar: true, icon: path.join(root, 'assets/icon.png')});
+    preferencesWindow = secureWindow({width: 560, height: 292, useContentSize: true, resizable: false, title: 'default_wallpaper', backgroundColor: '#050505', autoHideMenuBar: true, icon: path.join(root, 'assets/icon.png')});
     preferencesWindow.removeMenu(); preferencesWindow.loadFile(path.join(__dirname, 'settings.html'));
   } else { preferencesWindow.show(); preferencesWindow.focus(); }
 }
@@ -48,28 +49,28 @@ function showControls() {
   controlWindow = undefined;
   if (!prefs.desktopButtons) return;
   const d = screen.getPrimaryDisplay();
-  controlWindow = secureWindow({width: 72, height: 32, x: d.workArea.x + 16, y: d.workArea.y + d.workArea.height - 48, frame: false, transparent: true, resizable: false, maximizable: false, fullscreenable: false, focusable: process.platform === 'linux', skipTaskbar: process.platform !== 'linux', show: false, title: 'Wallpaper Generator — Кнопки'});
+  controlWindow = secureWindow({width: 72, height: 32, x: d.workArea.x + 16, y: d.workArea.y + d.workArea.height - 48, frame: false, transparent: true, resizable: false, maximizable: false, fullscreenable: false, focusable: process.platform === 'linux', skipTaskbar: process.platform !== 'linux', show: false, title: 'default_wallpaper — Controls'});
   controlWindow.loadFile(path.join(__dirname, 'controls.html'));
   controlWindow.once('ready-to-show', () => { if (!controlWindow?.isDestroyed()) { controlWindow.showInactive(); if (process.platform === 'win32') controlWindow.moveBottom(); } });
 }
 function registerShortcut(next) {
   if (next === prefs?.shortcut) return;
-  if (next && !globalShortcut.register(next, () => safely(generate()))) throw Error('Эта комбинация занята или не поддерживается окружением. Выберите другую.');
+  if (next && !globalShortcut.register(next, () => safely(generate()))) throw Error('Shortcut unavailable. Choose another.');
   if (prefs?.shortcut) globalShortcut.unregister(prefs.shortcut);
 }
 async function update(value) {
   const next = core.settings(value, {documents: app.getPath('documents')});
-  if (value.shortcut && !core.validShortcut(value.shortcut)) throw Error('Используйте Ctrl / Alt / Super + клавишу');
-  if (next.photoSource === 'folder' && !path.isAbsolute(next.photoFolder)) throw Error('Сначала выберите папку фотографий');
+  if (value.shortcut && !core.validShortcut(value.shortcut)) throw Error('Use Ctrl / Alt / Super + a key');
+  if (next.photoSource === 'folder' && !path.isAbsolute(next.photoFolder)) throw Error('Choose a photo folder first');
   registerShortcut(next.shortcut);
   try { await core.atomicJSON(settingsFile(), next); }
   catch (e) { if (next.shortcut) globalShortcut.unregister(next.shortcut); if (prefs.shortcut) globalShortcut.register(prefs.shortcut, () => safely(generate())); throw e; }
   const buttonsChanged = prefs.desktopButtons !== next.desktopButtons;
-  prefs = next; error = ''; status = 'Настройки сохранены'; if (buttonsChanged) showControls(); publish(); return state();
+  prefs = next; error = ''; status = ''; if (buttonsChanged) showControls(); publish(); return state();
 }
 async function choose(kind) {
-  if (!['photo', 'save'].includes(kind)) throw Error('Неизвестный тип папки');
-  const result = await dialog.showOpenDialog(preferencesWindow, {title: kind === 'photo' ? 'Папка фотографий' : 'Папка сохранения работ', defaultPath: kind === 'photo' ? prefs.photoFolder || app.getPath('pictures') : prefs.saveFolder, properties: ['openDirectory', 'createDirectory']});
+  if (!['photo', 'save'].includes(kind)) throw Error('Unknown folder type');
+  const result = await dialog.showOpenDialog(preferencesWindow, {title: kind === 'photo' ? 'Photo folder' : 'Export folder', defaultPath: kind === 'photo' ? prefs.photoFolder || app.getPath('pictures') : prefs.saveFolder, properties: ['openDirectory', 'createDirectory']});
   if (!result.canceled && result.filePaths[0]) return update({...prefs, ...(kind === 'photo' ? {photoSource: 'folder', photoFolder: result.filePaths[0]} : {saveFolder: result.filePaths[0]})});
   return state();
 }
@@ -78,7 +79,7 @@ function installIPC() {
   for (const [name, action] of Object.entries(actions)) ipcMain.handle(name, async (event, ...args) => {
     const senderWindow = BrowserWindow.fromWebContents(event.sender);
     const allowed = [pathToFileURL(path.join(__dirname, 'settings.html')).href, pathToFileURL(path.join(__dirname, 'controls.html')).href];
-    if (!windows.has(senderWindow) || event.senderFrame !== event.sender.mainFrame || !allowed.includes(event.senderFrame.url)) throw Error('Недопустимый источник запроса');
+    if (!windows.has(senderWindow) || event.senderFrame !== event.sender.mainFrame || !allowed.includes(event.senderFrame.url)) throw Error('Invalid request source');
     try { return await action(...args); } catch (e) { error = e.message; publish(); throw e; }
   });
 }
@@ -87,7 +88,7 @@ async function samplePhotos() {
   const dir = prefs.photoSource === 'system' ? app.getPath('pictures') : prefs.photoFolder;
   let names;
   try { names = await fs.readdir(dir, {withFileTypes: true}); }
-  catch (e) { if (prefs.photoSource === 'system' && e.code === 'ENOENT') return []; throw Error('Не удалось прочитать папку фотографий: ' + e.message); }
+  catch (e) { if (prefs.photoSource === 'system' && e.code === 'ENOENT') return []; throw Error('Cannot read photo folder: ' + e.message); }
   const candidates = names.filter(n => n.isFile() && /\.(png|jpe?g|webp|bmp)$/i.test(n.name));
   const photos = [];
   while (candidates.length && photos.length < 4) {
@@ -114,27 +115,27 @@ async function renderFrames(targets, base, palette, photos, extra = {}) {
     return win.webContents.executeJavaScript(`(async()=>{for(let i=0;i<500&&!window.Art?.isReady;i++)await new Promise(r=>setTimeout(r,20));if(!window.Art?.isReady)throw Error('Engine not ready');await DesktopExperiments.setPhotos(${JSON.stringify(photos)});let palette=${JSON.stringify(palette || null)};const extra=${JSON.stringify(extra)};if(extra.family==='__photo_fixture__')extra.family=DesktopExperiments.catalogue.find(r=>r.source==='photo').id;const out=[];for(const t of ${JSON.stringify(targets)}){Art.resize(t.width,t.height,1);Art.load({seed:t.seed,...extra,recent:[],...(palette?{palette}: {})});Art.setVisible(false);const frame=Art.stillFrame(t.width,t.height),record=Art.metadata();palette=palette||record.palette;out.push({id:t.id,png:frame.png,record,palette});}return out;})()`);
   };
   let timeout;
-  try { return await Promise.race([render(), new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('Превышено время ожидания генератора')), 120000); })]); }
+  try { return await Promise.race([render(), new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('Renderer timed out')), 120000); })]); }
   finally { clearTimeout(timeout); if (!win.isDestroyed()) win.destroy(); }
 }
 async function generate({refresh = false} = {}) {
   if (busy) { if (refresh) pendingRefresh = true; return; }
-  busy = true; error = ''; status = 'Генерация…'; publish();
+  busy = true; error = ''; status = 'Generating…'; publish();
   try {
-    const targets = displays(); if (!targets.length) throw Error('Нет подключённых экранов');
+    const targets = displays(); if (!targets.length) throw Error('No displays connected');
     const reuse = refresh && current;
     const base = reuse ? current.base : crypto.randomBytes(4).readUInt32LE(0) || 1;
     const photos = reuse ? current.photos || [] : await samplePhotos();
     const keep = reuse ? current.works.filter(w => targets.some(t => t.id === w.id && t.width === w.width && t.height === w.height)).map(w => ({...w, ...targets.find(t => t.id === w.id)})) : [];
     const missing = targets.filter(t => !keep.some(w => w.id === t.id));
     const frames = missing.length ? await renderFrames(missing.map(t => ({...t, seed: core.seedFor(base, t.id)})), base, reuse ? current.palette : null, photos) : [];
-    if (frames.length !== missing.length) throw Error('Неполный набор экранов');
+    if (frames.length !== missing.length) throw Error('Incomplete display set');
     const directory = path.join(app.getPath('userData'), 'wallpapers'); await fs.mkdir(directory, {recursive: true});
     const works = [...keep];
     for (const frame of frames) {
       const target = missing.find(t => t.id === frame.id);
       const image = nativeImage.createFromDataURL(frame.png), size = image.getSize();
-      if (image.isEmpty() || size.width !== target.width || size.height !== target.height) throw Error('Некорректный размер обоев');
+      if (image.isEmpty() || size.width !== target.width || size.height !== target.height) throw Error('Invalid wallpaper dimensions');
       const file = path.join(directory, crypto.randomUUID() + '.png'); await fs.writeFile(file, image.toPNG());
       works.push({...target, path: file, record: frame.record});
     }
@@ -148,7 +149,7 @@ async function generate({refresh = false} = {}) {
     }
     const retaining = new Set([...works, ...(previous?.works || [])].map(w => path.basename(w.path)));
     for (const name of await fs.readdir(directory)) if (/^[\da-f-]{36}\.png$/.test(name) && !retaining.has(name)) await fs.rm(path.join(directory, name));
-    status = warning || 'Новые обои готовы';
+    status = warning || '';
   } catch (e) { error = e.message; status = ''; throw e; }
   finally { busy = false; publish(); if (pendingRefresh) { pendingRefresh = false; safely(generate({refresh: true})); } }
 }
@@ -159,7 +160,7 @@ async function save() {
   await fs.mkdir(destination, {recursive: true});
   const folder = path.join(destination, 'work-' + new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomUUID().slice(0, 8));
   await core.exportWork({work, photos: current.photos, folder, art});
-  error = ''; status = 'Сохранено: ' + folder; publish(); return folder;
+  error = ''; status = 'Saved: ' + folder; publish(); return folder;
 }
 async function openFolder() { await fs.mkdir(prefs.saveFolder, {recursive: true}); const message = await shell.openPath(prefs.saveFolder); if (message) throw Error(message); }
 async function smokeTest() {
@@ -205,7 +206,7 @@ async function smokeTest() {
   const customExport=await save(); if (!customExport.startsWith(prefs.saveFolder+path.sep)) throw Error('Custom export folder not used');
   const persisted=await readJSON(settingsFile());if(persisted.photoFolder!==fixtureDir||persisted.saveFolder!==prefs.saveFolder||persisted.shortcut!=='Control+Alt+G')throw Error('Settings did not persist');
   checkpoint('screenshots');
-  await update({...prefs,intervalMinutes:60,photoSource:'system',saveFolder:path.join(app.getPath('documents'),'Wallpaper Generator'),desktopButtons:true});
+  await update({...prefs,intervalMinutes:60,photoSource:'system',saveFolder:path.join(app.getPath('documents'),'default_wallpaper'),desktopButtons:true});
   await preferencesWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
   await fs.writeFile(path.join(qa, 'settings.png'), (await preferencesWindow.webContents.capturePage()).toPNG());
   await controlWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
@@ -231,8 +232,8 @@ else {
     installIPC();
     if (smoke) return smokeTest();
     tray = new Tray(nativeImage.createFromPath(path.join(root, 'assets/icon.png')).resize({width: 24, height: 24}));
-    tray.setToolTip('Wallpaper Generator'); tray.on('double-click', showSettings); publish();
-    if (prefs.shortcut && !globalShortcut.register(prefs.shortcut, () => safely(generate()))) { error = 'Шорткат недоступен — выберите другой в настройках'; publish(); }
+    tray.setToolTip('default_wallpaper'); tray.on('double-click', showSettings); publish();
+    if (prefs.shortcut && !globalShortcut.register(prefs.shortcut, () => safely(generate()))) { error = 'Shortcut unavailable. Choose another in Settings.'; publish(); }
     showControls();
     screen.on('display-added', () => { showControls(); safely(generate({refresh: true})); });
     screen.on('display-removed', () => { showControls(); safely(generate({refresh: true})); });

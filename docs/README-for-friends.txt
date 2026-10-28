@@ -1,6 +1,6 @@
-Wallpaper Generator 1.0.0 — default_wallpapers
+default_wallpaper 1.0.0 — default_wallpapers
 
-macOS 14+: open the DMG, drag Wallpaper Generator to Applications.
+macOS 14+: open the DMG, drag default_wallpaper to Applications.
 The build is ad-hoc signed, not notarized. If macOS blocks it, use System Settings
 > Privacy & Security > Open Anyway, only after checking that this is your download.
 Apple Silicon and Intel are included in one app. No admin access is needed if you
@@ -32,8 +32,8 @@ Multiple screens share a palette. macOS and Windows support individual images;
 Linux GNOME/XFCE/Cinnamon/MATE use one generated work on all screens.
 KDE Plasma has a per-screen adapter; monitor ordering needs checking on hardware.
 
-Data: macOS ~/Library/Application Support/audio.default.wallpaper-generator
-Windows/Linux: the Electron userData directory for “Wallpaper Generator”.
+Data: macOS ~/Library/Application Support/audio.default.wallpaper
+Windows/Linux: the Electron userData directory for “default_wallpaper”.
 Uninstalling does not remove saved projects. The last system wallpaper remains.
 
 Build/CI verification is documented in the GitHub release. It does not substitute

@@ -1,13 +1,13 @@
-// Wallpaper Generator: a menu-bar app that sets default_desktop's generative
+// default_wallpaper: a menu-bar app that sets default_desktop's generative
 // works as the system desktop picture. It shares the engine (Resources/art)
 // with default_desktop; there are no widgets, no photos and no network.
 import AppKit
 import WebKit
 
 let appSupport = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/audio.default.wallpaper-generator", isDirectory: true)
+    .appendingPathComponent("Library/Application Support/audio.default.wallpaper", isDirectory: true)
 let wallpapersDirectory = appSupport.appendingPathComponent("wallpapers", isDirectory: true)
-let saveDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Wallpaper Generator", isDirectory: true)
+let saveDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/default_wallpaper", isDirectory: true)
 let engineDirectory = Bundle.main.resourceURL!.appendingPathComponent("art", isDirectory: true)
 
 /// Native pixel size of a screen (the panel's own resolution, not the scaled UI size).
@@ -58,12 +58,12 @@ final class Renderer: NSObject, WKNavigationDelegate {
     private var arguments: [String: Any] = [:]
     private var timeout: DispatchWorkItem?
     func run(_ script: String, arguments: [String: Any], page: URL? = nil, completion: @escaping (Result<Any, Error>) -> Void) {
-        guard self.completion == nil else { completion(.failure(NSError(domain: "Renderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Рендер уже выполняется"]))); return }
+        guard self.completion == nil else { completion(.failure(NSError(domain: "Renderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Renderer is busy"]))); return }
         self.script = script; self.arguments = arguments; self.completion = completion
         let configuration = WKWebViewConfiguration(); configuration.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 270), configuration: configuration)
         view.navigationDelegate = self; web = view
-        let deadline = DispatchWorkItem { [weak self] in self?.fail("Превышено время ожидания генератора") }
+        let deadline = DispatchWorkItem { [weak self] in self?.fail("Renderer timed out") }
         timeout = deadline; DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: deadline)
         let file = page ?? engineDirectory.appendingPathComponent("index.html")
         view.loadFileURL(file, allowingReadAccessTo: file.deletingLastPathComponent())
@@ -77,7 +77,7 @@ final class Renderer: NSObject, WKNavigationDelegate {
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { fail("Процесс генератора завершился") }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { fail("Renderer process stopped") }
     private func fail(_ message: String) { finish(.failure(NSError(domain: "Renderer", code: 2, userInfo: [NSLocalizedDescriptionKey: message]))) }
     private func finish(_ result: Result<Any, Error>) {
         guard let callback = completion else { return }; completion = nil; timeout?.cancel(); timeout = nil
@@ -124,20 +124,20 @@ final class Generator: NSObject, NSMenuDelegate {
         do { try FileManager.default.createDirectory(at: wallpapersDirectory, withIntermediateDirectories: true) } catch { report(error); return }
         set = (try? Data(contentsOf: indexURL)).flatMap { try? JSONDecoder().decode(WallpaperSet.self, from: $0) }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); self.item = item
-        item.button?.image = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Wallpaper Generator")
-        item.button?.toolTip = "Wallpaper Generator"
+        item.button?.image = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "default_wallpaper")
+        item.button?.toolTip = "default_wallpaper"
         let menu = NSMenu(); menu.autoenablesItems = false; menu.delegate = self; self.menu = menu; item.menu = menu
-        menu.addItem(withTitle: "Сгенерировать обои", action: #selector(generateAll), keyEquivalent: "g")
-        menu.addItem(withTitle: "Сохранить скетч + PNG", action: #selector(save), keyEquivalent: "s")
+        menu.addItem(withTitle: "Generate", action: #selector(generateAll), keyEquivalent: "g")
+        menu.addItem(withTitle: "Save sketch + PNG", action: #selector(save), keyEquivalent: "s")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Настройки…", action: #selector(showSettings), keyEquivalent: ",")
-        menu.addItem(withTitle: "Открыть папку сохранения", action: #selector(openFolder), keyEquivalent: "")
-        menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
+        menu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        menu.addItem(withTitle: "Open export folder", action: #selector(openFolder), keyEquivalent: "")
+        menu.addItem(withTitle: "", action: nil, keyEquivalent: ""); menu.items[5].isHidden = true
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Выйти", action: #selector(quit), keyEquivalent: "q")
+        menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         hotkey.action = { [weak self] in self?.generateAll() }
-        if !hotkey.register(settings) { lastError = "Шорткат занят — выберите другой в настройках" }
+        if !hotkey.register(settings) { lastError = "Shortcut in use. Choose another in Settings." }
         schedule(); rebuildControls()
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.rebuildControls(); self?.updateScreens() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.apply() })
@@ -146,14 +146,15 @@ final class Generator: NSObject, NSMenuDelegate {
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.items[0].isEnabled = !busy; menu.items[1].isEnabled = !busy && set != nil
-        menu.items[5].title = busy ? "Генерация…" : (lastError.isEmpty ? "Wallpaper Generator 1.0.0" : lastError)
+        menu.items[0].title = busy ? "Generating…" : "Generate"
+        menu.items[5].title = lastError; menu.items[5].isHidden = lastError.isEmpty
     }
     private func rebuildControls() { controls.rebuild(show: settings.desktopButtons, target: self); controls.setEnabled(!busy) }
     @objc func showSettings() {
         if preferences == nil { preferences = SettingsWindow(settings) { [weak self] value in
             guard let self else { return nil }
-            if value.photoSource == "folder" && !value.photoFolder.hasPrefix("/") { return "Выберите папку фотографий" }
-            if !self.hotkey.register(value) { _ = self.hotkey.register(self.settings); return "Шорткат занят. Настройки не сохранены: выберите другую комбинацию." }
+            if value.photoSource == "folder" && !value.photoFolder.hasPrefix("/") { return "Choose a photo folder" }
+            if !self.hotkey.register(value) { _ = self.hotkey.register(self.settings); return "Shortcut in use. Choose another." }
             do { try value.write(); self.settings = value; self.schedule(); self.rebuildControls(); return nil }
             catch { _ = self.hotkey.register(self.settings); return error.localizedDescription }
         } }
@@ -185,10 +186,10 @@ final class Generator: NSObject, NSMenuDelegate {
             defer { self.busy = false; self.controls.setEnabled(true) }
             do {
                 let value = try result.get()
-                guard let frames = value as? [[String: Any]], frames.count == targets.count else { throw self.error("Генератор вернул неполный набор экранов") }
+                guard let frames = value as? [[String: Any]], frames.count == targets.count else { throw self.error("Incomplete display set") }
                 var works = keep.filter { w in !targets.contains { $0.id == w.id } }, chosen = palette ?? []
                 for frame in frames {
-                    guard let id = frame["id"] as? String, let png = frame["png"] as? String, let comma = png.firstIndex(of: ","), let data = Data(base64Encoded: String(png[png.index(after: comma)...])), let record = frame["record"] as? [String: Any], let image = NSBitmapImageRep(data: data), let target = targets.first(where: { $0.id == id }), image.pixelsWide == Int(target.size.width), image.pixelsHigh == Int(target.size.height) else { throw self.error("Некорректный кадр генератора") }
+                    guard let id = frame["id"] as? String, let png = frame["png"] as? String, let comma = png.firstIndex(of: ","), let data = Data(base64Encoded: String(png[png.index(after: comma)...])), let record = frame["record"] as? [String: Any], let image = NSBitmapImageRep(data: data), let target = targets.first(where: { $0.id == id }), image.pixelsWide == Int(target.size.width), image.pixelsHigh == Int(target.size.height) else { throw self.error("Invalid renderer frame") }
                     let url = wallpapersDirectory.appendingPathComponent("wallpaper-\(UUID().uuidString).png")
                     try data.write(to: url, options: .atomic)
                     works.append(Work(id: id, path: url.path, record: record.mapValues { AnyCodable($0) }))
@@ -201,8 +202,8 @@ final class Generator: NSObject, NSMenuDelegate {
             } catch { self.report(error) }
         }
     }
-    private func error(_ message: String) -> NSError { NSError(domain: "Wallpaper Generator", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
-    private func report(_ error: Error) { lastError = error.localizedDescription; item?.button?.toolTip = "Wallpaper Generator: " + lastError; NSLog("%@", lastError) }
+    private func error(_ message: String) -> NSError { NSError(domain: "default_wallpaper", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+    private func report(_ error: Error) { lastError = error.localizedDescription; item?.button?.toolTip = "default_wallpaper: " + lastError; NSLog("%@", lastError) }
     private func apply() {
         guard let set else { return }
         for screen in NSScreen.screens {
@@ -226,7 +227,7 @@ final class Generator: NSObject, NSMenuDelegate {
             let record = work.record.mapValues { $0.value }
             let folder = URL(fileURLWithPath: settings.saveFolder, isDirectory: true).appendingPathComponent("work-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))", isDirectory: true)
             try exportWork(record: record, photos: set.photos ?? [], png: URL(fileURLWithPath: work.path), folder: folder)
-            lastError = ""; item?.button?.toolTip = "Сохранено: " + folder.path
+            lastError = ""; item?.button?.toolTip = "Saved: " + folder.path
         } catch { report(error) }
     }
     private func schedule() {
@@ -262,7 +263,7 @@ func exportWork(record: [String: Any], photos: [[String: String]], png: URL, fol
         let photoJSON = String(data: try JSONSerialization.data(withJSONObject: selected, options: [.sortedKeys]), encoding: .utf8)!
         let source = "window.DEFAULT_DESKTOP_WIDTH=\(size[0]);window.DEFAULT_DESKTOP_HEIGHT=\(size[1]);window.DEFAULT_DESKTOP_DENSITY=1;window.DEFAULT_DESKTOP_SKETCH=\(parameters);\n" + engine + "\nDesktopExperiments.setPhotos(\(photoJSON)).then(()=>{\n" + renderer + "\n});\n"
         try Data(source.utf8).write(to: folder.appendingPathComponent("sketch.js"))
-        let html = "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Wallpaper Generator — p5.js</title><style>html,body{margin:0;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style><script src=\"p5.min.js\"></script></head><body><script src=\"sketch.js\"></script></body></html>"
+        let html = "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>default_wallpaper — p5.js</title><style>html,body{margin:0;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style><script src=\"p5.min.js\"></script></head><body><script src=\"sketch.js\"></script></body></html>"
         try Data(html.utf8).write(to: folder.appendingPathComponent("index.html"))
         try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys]).write(to: folder.appendingPathComponent("recipe.json"))
         for name in ["p5.min.js", "p5-LICENSE.txt"] { try fm.copyItem(at: engineDirectory.appendingPathComponent(name), to: folder.appendingPathComponent(name)) }

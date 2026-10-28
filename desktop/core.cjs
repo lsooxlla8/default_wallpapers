@@ -7,7 +7,7 @@ function settings(value = {}, paths = {}) {
     intervalMinutes: INTERVALS.includes(value.intervalMinutes) ? value.intervalMinutes : 60,
     photoSource: ['system', 'folder', 'none'].includes(value.photoSource) ? value.photoSource : 'system',
     photoFolder: typeof value.photoFolder === 'string' ? value.photoFolder : '',
-    saveFolder: typeof value.saveFolder === 'string' && path.isAbsolute(value.saveFolder) ? value.saveFolder : path.join(paths.documents || '.', 'Wallpaper Generator'),
+    saveFolder: typeof value.saveFolder === 'string' && path.isAbsolute(value.saveFolder) ? value.saveFolder : path.join(paths.documents || '.', 'default_wallpaper'),
     desktopButtons: value.desktopButtons === true,
     shortcut: validShortcut(value.shortcut) ? value.shortcut : ''
   };
@@ -38,7 +38,7 @@ async function exportWork({work, photos = [], folder, art}) {
     const source = `window.DEFAULT_DESKTOP_WIDTH=${w};window.DEFAULT_DESKTOP_HEIGHT=${h};window.DEFAULT_DESKTOP_DENSITY=1;window.DEFAULT_DESKTOP_SKETCH=${JSON.stringify(record)};\n${parts.join('\n\n')}\nDesktopExperiments.setPhotos(${JSON.stringify(selected)}).then(()=>{\n${renderer}\n});\n`;
     await fs.writeFile(path.join(folder, 'sketch.js'), source);
     await fs.writeFile(path.join(folder, 'recipe.json'), JSON.stringify(record, null, 2));
-    await fs.writeFile(path.join(folder, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wallpaper Generator — p5.js</title><style>html,body{margin:0;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style><script src="p5.min.js"></script></head><body><script src="sketch.js"></script></body></html>');
+    await fs.writeFile(path.join(folder, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>default_wallpaper — p5.js</title><style>html,body{margin:0;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style><script src="p5.min.js"></script></head><body><script src="sketch.js"></script></body></html>');
     for (const name of ['p5.min.js', 'p5-LICENSE.txt']) await fs.copyFile(path.join(art, name), path.join(folder, name));
     await fs.copyFile(work.path, path.join(folder, 'wallpaper.png'));
   } catch (error) { await fs.rm(folder, {recursive: true, force: true}); throw error; }
