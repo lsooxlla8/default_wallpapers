@@ -51,7 +51,7 @@ function showControls() {
   const d = screen.getPrimaryDisplay();
   controlWindow = secureWindow({width: 72, height: 32, x: d.workArea.x + 16, y: d.workArea.y + d.workArea.height - 48, frame: false, transparent: true, resizable: false, maximizable: false, fullscreenable: false, focusable: process.platform === 'linux', skipTaskbar: process.platform !== 'linux', show: false, title: 'default_wallpaper — Controls'});
   controlWindow.loadFile(path.join(__dirname, 'controls.html'));
-  controlWindow.once('ready-to-show', () => { if (!controlWindow?.isDestroyed()) { controlWindow.showInactive(); if (process.platform === 'win32') controlWindow.moveBottom(); } });
+  controlWindow.once('ready-to-show', () => { if (!controlWindow?.isDestroyed()) { if(process.platform==='linux'&&process.env.XDG_SESSION_TYPE==='wayland')controlWindow.show();else controlWindow.showInactive();if(process.platform==='win32'){const handle=controlWindow.getNativeWindowHandle();safely(platform.lowerWindows(handle.length===8?handle.readBigUInt64LE().toString():String(handle.readUInt32LE()),app.isPackaged?path.join(process.resourcesPath,'set-wallpaper.ps1'):path.join(__dirname,'set-wallpaper.ps1')));} } });
 }
 function registerShortcut(next) {
   if (next === prefs?.shortcut) return;

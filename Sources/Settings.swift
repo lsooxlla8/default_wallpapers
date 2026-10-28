@@ -80,8 +80,9 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
         settings = next; error = ""; reply(id)
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, message.webView === web, message.frameInfo.request.url == page,
+        guard message.frameInfo.isMainFrame, message.webView === web, web.url?.standardizedFileURL == page.standardizedFileURL,
               let body = message.body as? [String: Any], let id = (body["id"] as? NSNumber)?.intValue, let operation = body["operation"] as? String else { return }
+        if CommandLine.arguments.contains("--preview-settings") { print("Settings IPC: \(operation)") }
         switch operation {
         case "state": reply(id)
         case "settings":
@@ -109,7 +110,7 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
         }
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(navigationAction.request.url == page && navigationAction.targetFrame?.isMainFrame == true ? .allow : .cancel)
+        decisionHandler(navigationAction.request.url?.standardizedFileURL == page.standardizedFileURL ? .allow : .cancel)
     }
     func verifyUI(completion: @escaping (Bool) -> Void) {
         let script = """

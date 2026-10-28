@@ -16,6 +16,7 @@ app.setActivationPolicy(.accessory)
 if let i = arguments.firstIndex(of: "--preview-settings"), arguments.count > i + 1 {
     let out = URL(fileURLWithPath: arguments[i + 1], isDirectory: true)
     try! FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 30) { print("Settings verification timed out"); exit(1) }
     let preferences = SettingsWindow(Settings()) { _ in nil }; preferences.show()
     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
         preferences.verifyUI { valid in

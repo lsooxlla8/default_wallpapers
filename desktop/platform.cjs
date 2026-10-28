@@ -40,4 +40,5 @@ async function applyLinux(works, env = process.env, command = run) {
   if (keys.split('\n').includes('picture-uri-dark')) await command('gsettings', ['set', schema, 'picture-uri-dark', literal(uri)]);
   return works.length > 1 ? 'This desktop uses one image on all displays' : '';
 }
-module.exports = {applyWindows, applyLinux};
+async function lowerWindows(handle,helper){await run('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',helper,'-WindowHandle',handle]);}
+module.exports = {applyWindows, applyLinux, lowerWindows};

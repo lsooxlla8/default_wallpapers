@@ -42,7 +42,7 @@
     },
     "win": {
       "icon": "assets/icon.ico",
-      "artifactName": "default_wallpapers-${version}-windows-${arch}-setup.${ext}"
+      "artifactName": "default_wallpaper-${version}-windows-${arch}-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -56,7 +56,7 @@
       "icon": "assets/icon.png",
       "category": "Graphics",
       "maintainer": "default_audio <lsooxlla8@users.noreply.github.com>",
-      "artifactName": "default_wallpapers-${version}-linux-${arch}.${ext}",
+      "artifactName": "default_wallpaper-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
           "Name": "default_wallpaper",

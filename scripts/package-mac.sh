@@ -10,8 +10,8 @@ ditto "build/default_wallpaper.app" "$staging/default_wallpaper.app"
 ln -s /Applications "$staging/Applications"
 cp docs/README-for-friends.txt "$staging/README.txt"
 mkdir -p dist
-hdiutil create -volname "default_wallpaper" -srcfolder "$staging" -ov -format UDZO "dist/default_wallpapers-$version-macos-universal.dmg"
-cp "build/default_wallpaper.zip" "dist/default_wallpapers-$version-macos-universal.zip"
+hdiutil create -volname "default_wallpaper" -srcfolder "$staging" -ov -format UDZO "dist/default_wallpaper-$version-macos-universal.dmg"
+cp "build/default_wallpaper.zip" "dist/default_wallpaper-$version-macos-universal.zip"
 codesign --verify --deep --strict "build/default_wallpaper.app"
 lipo "build/default_wallpaper.app/Contents/MacOS/default_wallpaper" -verify_arch arm64 x86_64
-hdiutil verify "dist/default_wallpapers-$version-macos-universal.dmg"
+hdiutil verify "dist/default_wallpaper-$version-macos-universal.dmg"
