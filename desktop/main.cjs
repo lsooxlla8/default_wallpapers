@@ -163,9 +163,14 @@ async function save() {
 }
 async function openFolder() { await fs.mkdir(prefs.saveFolder, {recursive: true}); const message = await shell.openPath(prefs.saveFolder); if (message) throw Error(message); }
 async function smokeTest() {
+  let stage = 'initialization';
+  const checkpoint = value => { stage = value; console.log('[smoke] ' + value); };
+  const watchdog = setTimeout(() => { console.error('Smoke verification timed out at: ' + stage); app.exit(1); }, 180000);
+  checkpoint('initial generation');
   await fs.mkdir(qa, {recursive: true});
   await update({...prefs, photoSource: 'none', intervalMinutes: 0, saveFolder: qa});
   await generate(); const folder = await save();
+  checkpoint('photo export');
   const photo = {id: 'fixture-photo', url: nativeImage.createFromPath(path.join(root, 'assets/icon.png')).toDataURL()};
   const frames = await renderFrames([{id: 'landscape', width: 640, height: 360, seed: 17}, {id: 'portrait', width: 360, height: 640, seed: 29}], 7, null, [photo], {family: '__photo_fixture__'});
   for (const f of frames) await fs.writeFile(path.join(qa, f.id + '.png'), nativeImage.createFromDataURL(f.png).toPNG());
@@ -181,6 +186,7 @@ async function smokeTest() {
     if (result.photos !== 1 || !core.photoIDs(result.metadata).has(photo.id)) throw Error('Photo export did not reload');
     if (result.png !== photoFrame.png) throw Error('Photo export pixels differ from original');
   } finally { exported.destroy(); }
+  checkpoint('settings UI and IPC');
   showSettings();
   if (preferencesWindow.webContents.isLoading()) await new Promise(resolve => preferencesWindow.webContents.once('did-finish-load', resolve));
   const settingsViaUI = await preferencesWindow.webContents.executeJavaScript(`(async()=>{
@@ -192,11 +198,13 @@ async function smokeTest() {
     const state=await wallpapers.state();return state.settings.intervalMinutes===15&&state.settings.shortcut==='Control+Alt+G';
   })()`);
   if (!settingsViaUI) throw Error('Settings / shortcut recorder failed through actual IPC');
+  checkpoint('custom photo and export directories');
   const fixtureDir=path.join(qa,'fixture-photos');await fs.mkdir(fixtureDir,{recursive:true});await fs.copyFile(path.join(root,'assets/icon.png'),path.join(fixtureDir,'photo.png'));
   await update({...prefs,photoSource:'folder',photoFolder:fixtureDir,saveFolder:path.join(qa,'Custom exports — работы')});
   await generate(); if (current.photos.length!==1) throw Error('Custom photo folder not used');
   const customExport=await save(); if (!customExport.startsWith(prefs.saveFolder+path.sep)) throw Error('Custom export folder not used');
   const persisted=await readJSON(settingsFile());if(persisted.photoFolder!==fixtureDir||persisted.saveFolder!==prefs.saveFolder||persisted.shortcut!=='Control+Alt+G')throw Error('Settings did not persist');
+  checkpoint('screenshots');
   await update({...prefs,intervalMinutes:60,photoSource:'system',saveFolder:path.join(app.getPath('documents'),'Wallpaper Generator'),desktopButtons:true});
   await preferencesWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
   await fs.writeFile(path.join(qa, 'settings.png'), (await preferencesWindow.webContents.capturePage()).toPNG());
@@ -204,7 +212,7 @@ async function smokeTest() {
   await fs.writeFile(path.join(qa, 'controls.png'), (await controlWindow.webContents.capturePage()).toPNG());
   const report = {platform: process.platform, version: app.getVersion(), frames: frames.map(f => ({id: f.id, size: f.record.renderSize, palette: f.palette})), exportedFolder: folder, photoExportExact: true, settingsViaUI, customPhotoFolder: true, customExportFolder: true, persistedSettings: true, desktopUnchanged: true, settings: prefs};
   await fs.writeFile(path.join(qa, 'report.json'), JSON.stringify(report, null, 2));
-  console.log(JSON.stringify(report)); app.exit(0);
+  clearTimeout(watchdog); console.log(JSON.stringify(report)); app.exit(0);
 }
 const hasLock = smoke || app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
