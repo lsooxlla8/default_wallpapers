@@ -114,6 +114,7 @@ final class Generator: NSObject, NSMenuDelegate {
     private var menu: NSMenu?
     private var timer: Timer?
     private var busy = false
+    private var pendingScreens = false
     private var set: WallpaperSet?
     private var settings = Settings.read()
     private var preferences: SettingsWindow?
@@ -172,7 +173,7 @@ final class Generator: NSObject, NSMenuDelegate {
         }
     }
     private func updateScreens() {
-        guard !busy else { return }
+        if busy { pendingScreens = true; return }
         guard let set else { generateAll(); return }
         let missing = targets(NSScreen.screens).filter { t in
             !set.works.contains { $0.id == t.id && FileManager.default.fileExists(atPath: $0.path) && ($0.record["renderSize"]?.value as? [NSNumber])?.map({ $0.intValue }) == [Int(t.size.width), Int(t.size.height)] }
@@ -183,7 +184,10 @@ final class Generator: NSObject, NSMenuDelegate {
         let list = targets.map { ["id": $0.id, "w": Int($0.size.width), "h": Int($0.size.height), "seed": Int(seedFor(base: base, id: $0.id))] as [String: Any] }
         renderer.run(generationScript, arguments: ["targets": list, "palette": palette ?? [], "photos": photos, "fixture": false]) { [weak self] result in
             guard let self else { return }
-            defer { self.busy = false; self.controls.setEnabled(true) }
+            defer {
+                self.busy = false; self.controls.setEnabled(true)
+                if self.pendingScreens { self.pendingScreens = false; self.updateScreens() }
+            }
             do {
                 let value = try result.get()
                 guard let frames = value as? [[String: Any]], frames.count == targets.count else { throw self.error("Incomplete display set") }
