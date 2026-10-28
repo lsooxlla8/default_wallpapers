@@ -9,7 +9,9 @@ put it in your personal ~/Applications directory instead.
 Windows 10/11 x64: run the setup EXE. Choose a per-user installation directory.
 This release has no publisher signature; Windows may show a reputation warning.
 
-Linux x64: install the DEB with your package manager, or make the AppImage
+Linux x64: on Ubuntu 24.04+ prefer the DEB (it installs an AppArmor profile).
+AppImage requires a system that permits its Chromium sandbox.
+Install the DEB with your package manager, or make the AppImage
 executable and launch it. AppImage needs FUSE 2, or use --appimage-extract-and-run.
 
 The tray menu always has Generate, Save, Settings, Open export folder and Quit.

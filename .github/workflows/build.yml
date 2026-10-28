@@ -89,6 +89,11 @@ jobs:
           chmod +x dist/*.AppImage
           xvfb-run -a -s '-screen 0 1600x1100x24' dist/*.AppImage --appimage-extract-and-run --smoke-test --smoke-out "$RUNNER_TEMP/packaged-qa"
           cp "$RUNNER_TEMP/packaged-qa/report.json" qa/packaged-report.json
+          # Verify the DEB with Ubuntu's normal namespace restriction restored.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
+          sudo apt-get install -y ./dist/*.deb
+          xvfb-run -a -s '-screen 0 1600x1100x24' /opt/default_wallpaper/default-wallpapers --smoke-test --smoke-out "$RUNNER_TEMP/deb-qa"
+          cp "$RUNNER_TEMP/deb-qa/report.json" qa/deb-installed-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-installers

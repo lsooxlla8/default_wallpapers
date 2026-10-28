@@ -18,7 +18,8 @@ without widgets, Obsidian, Telegram, accounts or network access.
 
 This release has no verified publisher certificate: macOS is ad-hoc signed and
 not notarized; Windows has no publisher signature. Your OS may require explicit
-approval. On macOS use **System Settings → Privacy & Security → Open Anyway**
+approval. On Ubuntu 24.04+ prefer the DEB; AppImage requires a system that permits
+its Chromium sandbox. On macOS use **System Settings → Privacy & Security → Open Anyway**
 for your verified download. AppImage needs FUSE 2, or `--appimage-extract-and-run`.
 
 ## Controls and settings
