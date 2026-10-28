@@ -557,9 +557,11 @@
     if(!grainLayer){grainLayer=document.createElement("div");grainLayer.style.cssText="position:fixed;pointer-events:none;z-index:1;mix-blend-mode:soft-light;background-size:128px 128px";grainLayer.style.backgroundImage="url("+grainPattern().toDataURL()+")";document.body.appendChild(grainLayer)}
     const r=canvas.elt.getBoundingClientRect();Object.assign(grainLayer.style,{display:"block",left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px",opacity:String(Math.min(.32,amount*2.6))});
   }
+  // Material coordinates belong to the work, independent of the host window.
+  // The production renderer uses a 480 px reference viewport.
   function applyGrain(g,width,s){
     const amount=s.material?.grain||0;if(!amount)return;
-    const ctx=g.drawingContext,pattern=ctx.createPattern(grainPattern(),"repeat"),scale=Math.max(1,width/(window.innerWidth||width));
+    const ctx=g.drawingContext,pattern=ctx.createPattern(grainPattern(),"repeat"),scale=Math.max(1,width/480);
     pattern.setTransform(new DOMMatrix().scale(scale));ctx.save();ctx.setTransform(g.pixelDensity(),0,0,g.pixelDensity(),0,0);ctx.globalAlpha=Math.min(.32,amount*2.6);ctx.globalCompositeOperation="soft-light";ctx.fillStyle=pattern;ctx.fillRect(0,0,width,g.height);ctx.restore();
   }
   function valid(candidate){

@@ -181,12 +181,28 @@ async function smokeTest() {
     if (result.photos !== 1 || !core.photoIDs(result.metadata).has(photo.id)) throw Error('Photo export did not reload');
     if (result.png !== photoFrame.png) throw Error('Photo export pixels differ from original');
   } finally { exported.destroy(); }
-  showSettings(); await preferencesWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
+  showSettings();
+  if (preferencesWindow.webContents.isLoading()) await new Promise(resolve => preferencesWindow.webContents.once('did-finish-load', resolve));
+  const settingsViaUI = await preferencesWindow.webContents.executeJavaScript(`(async()=>{
+    await new Promise(r=>setTimeout(r,100));
+    const interval=document.getElementById('interval');interval.value='15';interval.dispatchEvent(new Event('change'));
+    for(let i=0;i<100&&(await wallpapers.state()).settings.intervalMinutes!==15;i++)await new Promise(r=>setTimeout(r,20));
+    const shortcut=document.getElementById('shortcut');shortcut.click();shortcut.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyG',key:'g',ctrlKey:true,altKey:true,bubbles:true}));
+    for(let i=0;i<100&&(await wallpapers.state()).settings.shortcut!=='Control+Alt+G';i++)await new Promise(r=>setTimeout(r,20));
+    const state=await wallpapers.state();return state.settings.intervalMinutes===15&&state.settings.shortcut==='Control+Alt+G';
+  })()`);
+  if (!settingsViaUI) throw Error('Settings / shortcut recorder failed through actual IPC');
+  const fixtureDir=path.join(qa,'fixture-photos');await fs.mkdir(fixtureDir,{recursive:true});await fs.copyFile(path.join(root,'assets/icon.png'),path.join(fixtureDir,'photo.png'));
+  await update({...prefs,photoSource:'folder',photoFolder:fixtureDir,saveFolder:path.join(qa,'Custom exports — работы')});
+  await generate(); if (current.photos.length!==1) throw Error('Custom photo folder not used');
+  const customExport=await save(); if (!customExport.startsWith(prefs.saveFolder+path.sep)) throw Error('Custom export folder not used');
+  const persisted=await readJSON(settingsFile());if(persisted.photoFolder!==fixtureDir||persisted.saveFolder!==prefs.saveFolder||persisted.shortcut!=='Control+Alt+G')throw Error('Settings did not persist');
+  await update({...prefs,intervalMinutes:60,photoSource:'system',saveFolder:path.join(app.getPath('documents'),'Wallpaper Generator'),desktopButtons:true});
+  await preferencesWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
   await fs.writeFile(path.join(qa, 'settings.png'), (await preferencesWindow.webContents.capturePage()).toPNG());
-  await update({...prefs, desktopButtons: true});
   await controlWindow.webContents.executeJavaScript('new Promise(r=>setTimeout(r,250))');
   await fs.writeFile(path.join(qa, 'controls.png'), (await controlWindow.webContents.capturePage()).toPNG());
-  const report = {platform: process.platform, version: app.getVersion(), frames: frames.map(f => ({id: f.id, size: f.record.renderSize, palette: f.palette})), exportedFolder: folder, photoExportExact: true, desktopUnchanged: true, settings: prefs};
+  const report = {platform: process.platform, version: app.getVersion(), frames: frames.map(f => ({id: f.id, size: f.record.renderSize, palette: f.palette})), exportedFolder: folder, photoExportExact: true, settingsViaUI, customPhotoFolder: true, customExportFolder: true, persistedSettings: true, desktopUnchanged: true, settings: prefs};
   await fs.writeFile(path.join(qa, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report)); app.exit(0);
 }
