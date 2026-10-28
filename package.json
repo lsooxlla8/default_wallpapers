@@ -1,0 +1,72 @@
+{
+  "name": "default-wallpapers",
+  "productName": "Wallpaper Generator",
+  "version": "1.0.0",
+  "description": "Offline generative wallpapers with a tray menu, photo sources and source export",
+  "author": {
+    "name": "default_audio",
+    "email": "lsooxlla8@users.noreply.github.com"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "smoke": "electron . --smoke-test",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "electron-builder --linux AppImage deb --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "audio.default.wallpaper-generator",
+    "asar": true,
+    "files": [
+      "desktop/**/*",
+      "art/**/*",
+      "assets/icon.png",
+      "package.json",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop/set-wallpaper.ps1",
+        "to": "set-wallpaper.ps1"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "artifactName": "default_wallpapers-${version}-windows-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Graphics",
+      "maintainer": "default_audio <lsooxlla8@users.noreply.github.com>",
+      "artifactName": "default_wallpapers-${version}-linux-${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "Wallpaper Generator",
+          "Comment": "Generate wallpapers and manage photo sources"
+        }
+      }
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lsooxlla8/default_wallpapers.git"
+  }
+}

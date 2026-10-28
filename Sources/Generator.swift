@@ -48,46 +48,47 @@ struct AnyCodable: Codable {
     }
 }
 /// The current set: one work per display, sharing a palette and a seed base.
-struct WallpaperSet: Codable { var base: UInt32; var palette: [String]; var works: [Work] }
+struct WallpaperSet: Codable { var base: UInt32; var palette: [String]; var works: [Work]; var photos: [[String: String]]? = nil }
 
 /// Renders works in a temporary engine page and releases it afterwards.
 final class Renderer: NSObject, WKNavigationDelegate {
     private var web: WKWebView?
-    private var queue: [() -> Void] = []
-    private var ready = false
-    func run(_ script: String, arguments: [String:Any], completion: @escaping (Result<Any, Error>) -> Void) {
-        let job = { [weak self] in
-            guard let self, let web = self.web else { return }
-            web.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .page) { result in
-                completion(result.map { $0 ?? NSNull() }); self.release()
-            }
-        }
-        if ready { job() } else { queue.append(job); start() }
-    }
-    private func start() {
-        guard web == nil else { return }
+    private var completion: ((Result<Any, Error>) -> Void)?
+    private var script = ""
+    private var arguments: [String: Any] = [:]
+    private var timeout: DispatchWorkItem?
+    func run(_ script: String, arguments: [String: Any], completion: @escaping (Result<Any, Error>) -> Void) {
+        guard self.completion == nil else { completion(.failure(NSError(domain: "Renderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Рендер уже выполняется"]))); return }
+        self.script = script; self.arguments = arguments; self.completion = completion
         let configuration = WKWebViewConfiguration(); configuration.websiteDataStore = .nonPersistent()
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 270), configuration: configuration)
         view.navigationDelegate = self; web = view
+        let deadline = DispatchWorkItem { [weak self] in self?.fail("Превышено время ожидания генератора") }
+        timeout = deadline; DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: deadline)
         view.loadFileURL(engineDirectory.appendingPathComponent("index.html"), allowingReadAccessTo: engineDirectory)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        webView.callAsyncJavaScript("for(let i=0;i<300&&!window.Art?.isReady;i++)await new Promise(r=>setTimeout(r,20));return !!window.Art?.isReady;", arguments: [:], in: nil, in: .page) { [weak self] _ in
-            guard let self else { return }; self.ready = true
-            let jobs = self.queue; self.queue = []; jobs.forEach { $0() }
+        webView.callAsyncJavaScript("for(let i=0;i<500&&!window.Art?.isReady;i++)await new Promise(r=>setTimeout(r,20));if(!window.Art?.isReady)throw Error('Engine not ready');return true;", arguments: [:], in: nil, in: .page) { [weak self] result in
+            guard let self, self.completion != nil else { return }
+            if case .failure(let error) = result { self.finish(.failure(error)); return }
+            webView.callAsyncJavaScript(self.script, arguments: self.arguments, in: nil, in: .page) { [weak self] result in self?.finish(result) }
         }
     }
-    private func release() {
-        guard queue.isEmpty, let view = web else { return }
-        view.navigationDelegate = nil; view.stopLoading(); view.loadHTMLString("", baseURL: nil)
-        web = nil; ready = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { _ = view }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { finish(.failure(error)) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { fail("Процесс генератора завершился") }
+    private func fail(_ message: String) { finish(.failure(NSError(domain: "Renderer", code: 2, userInfo: [NSLocalizedDescriptionKey: message]))) }
+    private func finish(_ result: Result<Any, Error>) {
+        guard let callback = completion else { return }; completion = nil; timeout?.cancel(); timeout = nil
+        web?.navigationDelegate = nil; web?.stopLoading(); web = nil; arguments = [:]
+        callback(result)
     }
 }
 
 /// One coherent set: the first display chooses the palette, every display gets
 /// its own work (own seed from the base) at its native size and aspect.
 let generationScript = """
+await DesktopExperiments.setPhotos(photos||[]);
 const out=[];let pal=palette&&palette.length===3?palette:null;
 for(const t of targets){
   Art.resize(t.w,t.h,1);
@@ -104,166 +105,169 @@ func seedFor(base: UInt32, id: String) -> UInt32 {
     return h == 0 ? 1 : h
 }
 
-final class Generator: NSObject {
+final class Generator: NSObject, NSMenuDelegate {
     private let renderer = Renderer()
+    private let controls = DesktopControls()
+    private let hotkey = Hotkey()
     private var item: NSStatusItem?
-    private var hourly: NSMenuItem!
+    private var menu: NSMenu?
     private var timer: Timer?
     private var busy = false
     private var set: WallpaperSet?
+    private var settings = Settings.read()
+    private var preferences: SettingsWindow?
     private var observers: [NSObjectProtocol] = []
+    private var lastError = ""
     private var indexURL: URL { appSupport.appendingPathComponent("current.json") }
-
     func start() {
-        try? FileManager.default.createDirectory(at: wallpapersDirectory, withIntermediateDirectories: true)
+        do { try FileManager.default.createDirectory(at: wallpapersDirectory, withIntermediateDirectories: true) } catch { report(error); return }
         set = (try? Data(contentsOf: indexURL)).flatMap { try? JSONDecoder().decode(WallpaperSet.self, from: $0) }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength); self.item = item
-        item.button?.title = "◫"; item.button?.toolTip = "Wallpaper Generator"
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Сгенерировать для всех экранов", action: #selector(generateAll), keyEquivalent: "g")
-        menu.addItem(withTitle: "Сохранить (анимированный скетч + PNG)", action: #selector(save), keyEquivalent: "s")
-        hourly = menu.addItem(withTitle: "Менять каждый час", action: #selector(toggleHourly), keyEquivalent: "")
-        menu.addItem(withTitle: "Открыть папку", action: #selector(openFolder), keyEquivalent: "")
+        item.button?.image = NSImage(systemSymbolName: "square.stack", accessibilityDescription: "Wallpaper Generator")
+        item.button?.toolTip = "Wallpaper Generator"
+        let menu = NSMenu(); menu.delegate = self; self.menu = menu; item.menu = menu
+        menu.addItem(withTitle: "Сгенерировать обои", action: #selector(generateAll), keyEquivalent: "g")
+        menu.addItem(withTitle: "Сохранить скетч + PNG", action: #selector(save), keyEquivalent: "s")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Настройки…", action: #selector(showSettings), keyEquivalent: ",")
+        menu.addItem(withTitle: "Открыть папку сохранения", action: #selector(openFolder), keyEquivalent: "")
+        menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Выйти", action: #selector(quit), keyEquivalent: "q")
-        menu.items.forEach { $0.target = self }; item.menu = menu
-        hourly.state = UserDefaults.standard.bool(forKey: "hourly") ? .on : .off
-        scheduleHourly()
-        // New displays get their own work from the same base and palette;
-        // displays that already have one keep it.
-        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.updateScreens() })
+        menu.items.forEach { $0.target = self }
+        hotkey.action = { [weak self] in self?.generateAll() }
+        if !hotkey.register(settings) { lastError = "Шорткат занят — выберите другой в настройках" }
+        schedule(); rebuildControls()
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.rebuildControls(); self?.updateScreens() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.apply() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.checkSchedule() })
         if set == nil { generateAll() } else { updateScreens() }
     }
-    private func targets(_ screens: [NSScreen]) -> [Target] { screens.map { Target(id: displayKey($0), size: nativePixels($0)) } }
-    @objc func generateAll() { render(targets(NSScreen.screens), base: UInt32.random(in: 1...UInt32.max), palette: nil, keep: []) }
-    private func updateScreens() {
-        guard let set else { generateAll(); return }
-        let missing = targets(NSScreen.screens).filter { t in !set.works.contains { $0.id == t.id && FileManager.default.fileExists(atPath: $0.path) } }
-        if missing.isEmpty { apply() } else { render(missing, base: set.base, palette: set.palette, keep: set.works) }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.items[0].isEnabled = !busy; menu.items[1].isEnabled = !busy && set != nil
+        menu.items[5].title = busy ? "Генерация…" : (lastError.isEmpty ? "Wallpaper Generator 1.0.0" : lastError)
     }
-    func render(_ targets: [Target], base: UInt32, palette: [String]?, keep: [Work], completion: (() -> Void)? = nil) {
-        guard !busy, !targets.isEmpty else { completion?(); return }
-        busy = true; item?.button?.title = "◌"
-        let list = targets.map { ["id": $0.id, "w": Int($0.size.width), "h": Int($0.size.height), "seed": Int(seedFor(base: base, id: $0.id))] as [String:Any] }
-        renderer.run(generationScript, arguments: ["targets": list, "palette": palette ?? []]) { [weak self] result in
+    private func rebuildControls() { controls.rebuild(show: settings.desktopButtons, target: self); controls.setEnabled(!busy) }
+    @objc func showSettings() {
+        if preferences == nil { preferences = SettingsWindow(settings) { [weak self] value in
+            guard let self else { return nil }
+            if !self.hotkey.register(value) { _ = self.hotkey.register(self.settings); return "Шорткат занят. Настройки не сохранены: выберите другую комбинацию." }
+            do { try value.write(); self.settings = value; self.schedule(); self.rebuildControls(); return nil }
+            catch { _ = self.hotkey.register(self.settings); return error.localizedDescription }
+        } }
+        preferences?.show()
+    }
+    private func targets(_ screens: [NSScreen]) -> [Target] { screens.map { Target(id: displayKey($0), size: nativePixels($0)) } }
+    @objc func generateAll() {
+        guard !busy else { return }
+        let list = targets(NSScreen.screens); guard !list.isEmpty else { return }
+        busy = true; controls.setEnabled(false)
+        PhotoSource.sample(settings: settings) { [weak self] photos in self?.render(list, base: UInt32.random(in: 1...UInt32.max), palette: nil, keep: [], photos: photos) }
+    }
+    private func updateScreens() {
+        guard !busy else { return }
+        guard let set else { generateAll(); return }
+        let missing = targets(NSScreen.screens).filter { t in
+            !set.works.contains { $0.id == t.id && FileManager.default.fileExists(atPath: $0.path) && ($0.record["renderSize"]?.value as? [NSNumber])?.map({ $0.intValue }) == [Int(t.size.width), Int(t.size.height)] }
+        }
+        if missing.isEmpty { apply() } else { busy = true; render(missing, base: set.base, palette: set.palette, keep: set.works, photos: set.photos ?? []) }
+    }
+    private func render(_ targets: [Target], base: UInt32, palette: [String]?, keep: [Work], photos: [[String: String]]) {
+        let list = targets.map { ["id": $0.id, "w": Int($0.size.width), "h": Int($0.size.height), "seed": Int(seedFor(base: base, id: $0.id))] as [String: Any] }
+        renderer.run(generationScript, arguments: ["targets": list, "palette": palette ?? [], "photos": photos]) { [weak self] result in
             guard let self else { return }
-            defer { self.busy = false; self.item?.button?.title = "◫"; completion?() }
-            guard case .success(let value) = result, let frames = value as? [[String:Any]] else { NSSound.beep(); return }
-            let stamp = Int(Date().timeIntervalSince1970*1000)
-            var works = keep.filter { w in !frames.contains { ($0["id"] as? String) == w.id } }, chosen = palette ?? []
-            for frame in frames {
-                guard let id = frame["id"] as? String, let png = frame["png"] as? String, let comma = png.firstIndex(of: ","),
-                      let data = Data(base64Encoded: String(png[png.index(after: comma)...])), let record = frame["record"] as? [String:Any] else { continue }
-                let url = wallpapersDirectory.appendingPathComponent("wallpaper-\(base)-\(stamp)-\(id).png")
-                guard (try? data.write(to: url, options: .atomic)) != nil else { continue }
-                works.append(Work(id: id, path: url.path, record: record.mapValues { AnyCodable($0) }))
-                if chosen.isEmpty { chosen = frame["palette"] as? [String] ?? [] }
-            }
-            let previous = self.set
-            self.set = WallpaperSet(base: base, palette: chosen, works: works)
-            if let data = try? JSONEncoder().encode(self.set) { try? data.write(to: self.indexURL, options: .atomic) }
-            self.apply(); self.prune(keeping: [self.set, previous])
+            defer { self.busy = false; self.controls.setEnabled(true) }
+            do {
+                let value = try result.get()
+                guard let frames = value as? [[String: Any]], frames.count == targets.count else { throw self.error("Генератор вернул неполный набор экранов") }
+                var works = keep.filter { w in !targets.contains { $0.id == w.id } }, chosen = palette ?? []
+                for frame in frames {
+                    guard let id = frame["id"] as? String, let png = frame["png"] as? String, let comma = png.firstIndex(of: ","), let data = Data(base64Encoded: String(png[png.index(after: comma)...])), let record = frame["record"] as? [String: Any], let image = NSBitmapImageRep(data: data), let target = targets.first(where: { $0.id == id }), image.pixelsWide == Int(target.size.width), image.pixelsHigh == Int(target.size.height) else { throw self.error("Некорректный кадр генератора") }
+                    let url = wallpapersDirectory.appendingPathComponent("wallpaper-\(UUID().uuidString).png")
+                    try data.write(to: url, options: .atomic)
+                    works.append(Work(id: id, path: url.path, record: record.mapValues { AnyCodable($0) }))
+                    if chosen.isEmpty { chosen = frame["palette"] as? [String] ?? [] }
+                }
+                let next = WallpaperSet(base: base, palette: chosen, works: works, photos: photos)
+                try JSONEncoder().encode(next).write(to: self.indexURL, options: .atomic)
+                let previous = self.set; self.set = next; self.lastError = ""; self.apply(); self.prune(keeping: [next, previous])
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastGeneration")
+            } catch { self.report(error) }
         }
     }
+    private func error(_ message: String) -> NSError { NSError(domain: "Wallpaper Generator", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
+    private func report(_ error: Error) { lastError = error.localizedDescription; item?.button?.toolTip = "Wallpaper Generator: " + lastError; NSLog("%@", lastError) }
     private func apply() {
         guard let set else { return }
-        let fill = set.palette.first.flatMap { hex -> NSColor? in
-            let v = [1,3,5].compactMap { Int(hex.dropFirst($0).prefix(2), radix: 16) }
-            return v.count == 3 ? NSColor(calibratedRed: CGFloat(v[0])/255, green: CGFloat(v[1])/255, blue: CGFloat(v[2])/255, alpha: 1) : nil } ?? .black
         for screen in NSScreen.screens {
             guard let work = set.works.first(where: { $0.id == displayKey(screen) }) else { continue }
             let url = URL(fileURLWithPath: work.path)
             if NSWorkspace.shared.desktopImageURL(for: screen) != url {
-                try? NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [.imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue, .allowClipping: true, .fillColor: fill])
+                do { try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [.imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue, .allowClipping: true]) } catch { report(error) }
             }
         }
     }
     private func prune(keeping sets: [WallpaperSet?]) {
         let keep = Set(sets.compactMap { $0 }.flatMap { $0.works.map { $0.path } })
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: wallpapersDirectory.path)) ?? [] where name.hasSuffix(".png") {
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: wallpapersDirectory.path)) ?? [] where name.hasPrefix("wallpaper-") && name.hasSuffix(".png") {
             let path = wallpapersDirectory.appendingPathComponent(name).path
             if !keep.contains(path) { try? FileManager.default.removeItem(atPath: path) }
         }
     }
-    /// Saves the main display's work: a self-contained animated p5.js project
-    /// (index.html, sketch.js, p5.min.js, licence) and the still PNG.
     @objc func save() {
-        guard let set, let work = set.works.first(where: { $0.id == displayKey(NSScreen.main ?? NSScreen.screens[0]) }) ?? set.works.first else { return }
+        guard !busy, let set, let work = set.works.first(where: { $0.id == (NSScreen.main.map(displayKey) ?? "") }) ?? set.works.first else { return }
         do {
-            let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
             let record = work.record.mapValues { $0.value }
-            let folder = saveDirectory.appendingPathComponent("\(f.string(from: Date()))_\(record["seed"] as? NSNumber ?? 0)", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: engineDirectory.appendingPathComponent("engine.json"))) as? [String:Any]
-            let scripts = (manifest?["scripts"] as? [String] ?? []).filter { $0 != "p5.min.js" }
-            let engine = try scripts.map { try String(contentsOf: engineDirectory.appendingPathComponent($0), encoding: .utf8) }.joined(separator: "\n\n")
-            let size = record["renderSize"] as? [NSNumber]
-            let parameters = String(data: try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), encoding: .utf8)!
-            let source = """
-            // p5.js sketch saved by Wallpaper Generator (default_desktop engine).
-            window.DEFAULT_DESKTOP_WIDTH = \(size?.first?.intValue ?? 1920);
-            window.DEFAULT_DESKTOP_HEIGHT = \(size?.last?.intValue ?? 1080);
-            window.DEFAULT_DESKTOP_DENSITY = 1;
-            window.DEFAULT_DESKTOP_SKETCH = \(parameters);
-
-            \(engine)
-            """
-            try Data(source.utf8).write(to: folder.appendingPathComponent("sketch.js"))
-            let html = """
-            <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>p5.js sketch</title><style>html,body{margin:0;min-height:100%;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style>
-            <script src="p5.min.js"></script></head><body><script src="sketch.js"></script></body></html>
-            """
-            try Data(html.utf8).write(to: folder.appendingPathComponent("index.html"))
-            for name in ["p5.min.js", "p5-LICENSE.txt"] { try FileManager.default.copyItem(at: engineDirectory.appendingPathComponent(name), to: folder.appendingPathComponent(name)) }
-            try FileManager.default.copyItem(at: URL(fileURLWithPath: work.path), to: folder.appendingPathComponent("wallpaper.png"))
-            NSWorkspace.shared.activateFileViewerSelecting([folder])
-        } catch { NSSound.beep() }
+            let folder = URL(fileURLWithPath: settings.saveFolder, isDirectory: true).appendingPathComponent("work-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))", isDirectory: true)
+            try exportWork(record: record, photos: set.photos ?? [], png: URL(fileURLWithPath: work.path), folder: folder)
+            lastError = ""; item?.button?.toolTip = "Сохранено: " + folder.path
+        } catch { report(error) }
     }
-    @objc func toggleHourly() {
-        let on = hourly.state != .on; hourly.state = on ? .on : .off
-        UserDefaults.standard.set(on, forKey: "hourly"); scheduleHourly()
-    }
-    private func scheduleHourly() {
+    private func schedule() {
         timer?.invalidate(); timer = nil
-        guard hourly.state == .on else { return }
-        let t = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in self?.generateAll() }
-        t.tolerance = 60; RunLoop.main.add(t, forMode: .common); timer = t
+        guard settings.intervalMinutes > 0 else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkSchedule() }; timer?.tolerance = 5
+    }
+    private func checkSchedule() {
+        guard settings.intervalMinutes > 0 else { return }
+        let last = UserDefaults.standard.double(forKey: "lastGeneration")
+        if Date().timeIntervalSince1970 - last >= Double(settings.intervalMinutes * 60) { generateAll() }
     }
     @objc func openFolder() {
-        try? FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(saveDirectory)
+        let folder = URL(fileURLWithPath: settings.saveFolder, isDirectory: true)
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true); NSWorkspace.shared.open(folder) } catch { report(error) }
     }
     @objc func quit() { NSApp.terminate(nil) }
 }
 
+func exportWork(record: [String: Any], photos: [[String: String]], png: URL, folder: URL) throws {
+    let fm = FileManager.default
+    guard !fm.fileExists(atPath: folder.path) else { throw CocoaError(.fileWriteFileExists) }
+    try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+    do {
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: engineDirectory.appendingPathComponent("engine.json"))) as! [String: Any]
+        let scripts = (manifest["scripts"] as! [String]).filter { $0 != "p5.min.js" && $0 != "sketches.js" }
+        let engine = try scripts.map { try String(contentsOf: engineDirectory.appendingPathComponent($0), encoding: .utf8) }.joined(separator: "\n\n")
+        let renderer = try String(contentsOf: engineDirectory.appendingPathComponent("sketches.js"), encoding: .utf8)
+        let size = record["renderSize"] as? [NSNumber] ?? [1920, 1080]
+        let parameters = String(data: try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]), encoding: .utf8)!
+        let ids = photoIDs(record)
+        let selected = photos.filter { ids.contains($0["id"] ?? "") }
+        let photoJSON = String(data: try JSONSerialization.data(withJSONObject: selected, options: [.sortedKeys]), encoding: .utf8)!
+        let source = "window.DEFAULT_DESKTOP_WIDTH=\(size[0]);window.DEFAULT_DESKTOP_HEIGHT=\(size[1]);window.DEFAULT_DESKTOP_DENSITY=1;window.DEFAULT_DESKTOP_SKETCH=\(parameters);\n" + engine + "\nDesktopExperiments.setPhotos(\(photoJSON)).then(()=>{\n" + renderer + "\n});\n"
+        try Data(source.utf8).write(to: folder.appendingPathComponent("sketch.js"))
+        let html = "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Wallpaper Generator — p5.js</title><style>html,body{margin:0;background:#050505}body{min-height:100vh;display:grid;place-items:center}canvas{display:block;max-width:100vw;max-height:100vh;width:auto!important;height:auto!important}</style><script src=\"p5.min.js\"></script></head><body><script src=\"sketch.js\"></script></body></html>"
+        try Data(html.utf8).write(to: folder.appendingPathComponent("index.html"))
+        try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys]).write(to: folder.appendingPathComponent("recipe.json"))
+        for name in ["p5.min.js", "p5-LICENSE.txt"] { try fm.copyItem(at: engineDirectory.appendingPathComponent(name), to: folder.appendingPathComponent(name)) }
+        try fm.copyItem(at: png, to: folder.appendingPathComponent("wallpaper.png"))
+    } catch { try? fm.removeItem(at: folder); throw error }
+}
+func photoIDs(_ value: Any) -> Set<String> {
+    if let d = value as? [String: Any] { return d.reduce(into: Set<String>()) { result, pair in if pair.key == "photo", let id = pair.value as? String { result.insert(id) } else { result.formUnion(photoIDs(pair.value)) } } }
+    if let a = value as? [Any] { return a.reduce(into: Set<String>()) { $0.formUnion(photoIDs($1)) } }
+    return []
+}
+
 // --simulate-screens WxH,WxH,... <outDir>: renders a set for fake displays into
 // files (no desktop pictures are changed). Used to check multi-display logic.
-let arguments = CommandLine.arguments
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-if let i = arguments.firstIndex(of: "--simulate-screens"), arguments.count > i+2 {
-    let sizes = arguments[i+1].split(separator: ",").compactMap { s -> NSSize? in let p = s.split(separator: "x"); return p.count == 2 ? NSSize(width: Double(p[0])!, height: Double(p[1])!) : nil }
-    let out = URL(fileURLWithPath: arguments[i+2], isDirectory: true)
-    try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-    let renderer = Renderer(), base = UInt32(arguments.count > i+3 ? UInt32(arguments[i+3]) ?? 7 : 7)
-    let list = sizes.enumerated().map { ["id": "sim\($0.offset)", "w": Int($0.element.width), "h": Int($0.element.height), "seed": Int(seedFor(base: base, id: "sim\($0.offset)"))] as [String:Any] }
-    renderer.run(generationScript, arguments: ["targets": list, "palette": []]) { result in
-        guard case .success(let value) = result, let frames = value as? [[String:Any]] else { print("render failed", result); exit(1) }
-        var report: [[String:Any]] = []
-        for frame in frames {
-            let id = frame["id"] as? String ?? "?", png = frame["png"] as? String ?? ""
-            if let comma = png.firstIndex(of: ","), let data = Data(base64Encoded: String(png[png.index(after: comma)...])) { try? data.write(to: out.appendingPathComponent("\(id).png")) }
-            let record = frame["record"] as? [String:Any] ?? [:]
-            report.append(["id": id, "seed": record["seed"] ?? 0, "palette": record["palette"] ?? [], "renderSize": record["renderSize"] ?? [], "engine": (record["composition"] as? [String:Any])?["engine"] ?? "single"])
-        }
-        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted]) { try? data.write(to: out.appendingPathComponent("report.json")); print(String(data: data, encoding: .utf8)!) }
-        exit(0)
-    }
-    app.run()
-} else {
-    let generator = Generator()
-    generator.start()
-    app.run()
-}

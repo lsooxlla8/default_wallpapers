@@ -1,0 +1,77 @@
+name: Build installers
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: ./scripts/package-mac.sh
+      - name: Render simulated displays without changing desktop wallpapers
+        run: '"build/Wallpaper Generator.app/Contents/MacOS/Wallpaper Generator" --simulate-screens 1200x800,800x1200,640x360 qa/native 7'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installers
+          path: dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-verification
+          path: qa/
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libasound2t64 libgtk-3-0 libnss3 libgbm1
+      - if: runner.os == 'Linux'
+        name: Render, settings, buttons and exact photo export replay
+        run: xvfb-run -a -s '-screen 0 1600x1100x24' npm run smoke
+      - if: runner.os == 'Windows'
+        name: Render, settings, buttons and exact photo export replay
+        run: npm run smoke
+      - if: runner.os == 'Windows'
+        name: Verify Windows wallpaper COM helper
+        shell: powershell
+        run: |
+          ./desktop/set-wallpaper.ps1 -ManifestPath unused -CheckOnly
+          $report = Get-Content qa/app-data/current.json -Raw | ConvertFrom-Json
+          $works = @($report.works | ForEach-Object { @{ path=$_.path; x=$_.physical.x; y=$_.physical.y } })
+          ConvertTo-Json -InputObject $works | Set-Content qa/windows-test.json -Encoding UTF8
+          ./desktop/set-wallpaper.ps1 -ManifestPath qa/windows-test.json
+      - if: runner.os == 'Windows'
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: runner.os == 'Linux'
+        run: npm run dist:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-installers
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-verification
+          path: qa/
