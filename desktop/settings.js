@@ -25,7 +25,7 @@ function render(value) {
   $('interval').value=s.intervalMinutes;$('source').value=s.photoSource;$('buttons').checked=s.desktopButtons;$('button-state').textContent=s.desktopButtons?'ON':'OFF';
   if(value.platform==='darwin')$('source').options[0].textContent='SYSTEM PHOTOS';
   for(const sync of selectors.values())sync();
-  if(!recording)$('shortcut').value=s.shortcut;
+  if(!recording){$('shortcut').value=s.shortcut;$('shortcut').placeholder='RECORD';}
   $('photo-path').hidden=s.photoSource!=='folder';$('photo-path').textContent=s.photoFolder||'';$('photo-path').title=s.photoFolder||'';
   $('connect').hidden=value.platform!=='darwin'||s.photoSource!=='system'||value.photoAccess;
   $('save-path').textContent=s.saveFolder;$('choose-save').title=s.saveFolder;

@@ -196,7 +196,8 @@ async function smokeTest() {
     for(let i=0;i<100&&(await wallpapers.state()).settings.intervalMinutes!==15;i++)await new Promise(r=>setTimeout(r,20));
     const shortcut=document.getElementById('shortcut');shortcut.click();shortcut.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyG',key:'g',ctrlKey:true,altKey:true,bubbles:true}));
     for(let i=0;i<100&&(await wallpapers.state()).settings.shortcut!=='Control+Alt+G';i++)await new Promise(r=>setTimeout(r,20));
-    const state=await wallpapers.state();return state.settings.intervalMinutes===15&&state.settings.shortcut==='Control+Alt+G';
+    shortcut.click();shortcut.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));
+    const state=await wallpapers.state();return state.settings.intervalMinutes===15&&state.settings.shortcut==='Control+Alt+G'&&shortcut.placeholder==='RECORD';
   })()`);
   if (!settingsViaUI) throw Error('Settings / shortcut recorder failed through actual IPC');
   checkpoint('custom photo and export directories');
