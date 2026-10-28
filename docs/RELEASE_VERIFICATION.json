@@ -1,0 +1,68 @@
+{
+  "version": "1.0.0",
+  "application": "default_wallpaper",
+  "repository": "https://github.com/lsooxlla8/default_wallpapers",
+  "build_commit": "6553c979d11a24534ee9e2b49065e7f7024b3705",
+  "workflow": "https://github.com/lsooxlla8/default_wallpapers/actions/runs/40731739045",
+  "workflow_conclusion": "success",
+  "macos": {
+    "universal_arm64_x86_64": true,
+    "native_self_tests": true,
+    "simulated_display_sizes": [
+      [
+        1200,
+        800
+      ],
+      [
+        800,
+        1200
+      ],
+      [
+        640,
+        360
+      ]
+    ],
+    "photo_export_pixel_exact": true,
+    "settings_bridge": true,
+    "dmg_verified": true,
+    "signature": "ad-hoc, not notarized"
+  },
+  "windows": {
+    "arch": "x64",
+    "unit_tests": 10,
+    "settings_and_shortcut_recorder_via_ui": true,
+    "custom_photo_and_export_folders": true,
+    "photo_export_pixel_exact": true,
+    "wallpaper_com_set_call_succeeded": true,
+    "exe_installed_and_installed_app_verified": true,
+    "publisher_signature": false
+  },
+  "linux": {
+    "arch": "x64",
+    "runner": "Ubuntu 24.04",
+    "unit_tests": 10,
+    "settings_and_shortcut_recorder_via_ui": true,
+    "custom_photo_and_export_folders": true,
+    "photo_export_pixel_exact": true,
+    "packaged_appimage_verified": true,
+    "deb_installed_and_verified_with_namespace_restrictions": true
+  },
+  "screenshots": {
+    "native_pixels": [
+      560,
+      292
+    ],
+    "desktop_controls_pixels": [
+      72,
+      32
+    ],
+    "inspected": true
+  },
+  "not_verified": [
+    "Physical multi-monitor layouts and hotplug on user hardware",
+    "Physical global-shortcut input on user systems",
+    "macOS Photos consent flow and the user photo library",
+    "Real GNOME/KDE/XFCE/Wayland desktop sessions"
+  ],
+  "appimage_note": "Ubuntu 24.04+ users should prefer the DEB; AppImage needs working Chromium sandbox support."
+}

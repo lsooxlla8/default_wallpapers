@@ -6,6 +6,8 @@ without widgets, Obsidian, Telegram, accounts or network access.
 
 [Скачать / Download](https://github.com/lsooxlla8/default_wallpapers/releases/latest)
 
+![Settings](docs/settings-macos.png)
+
 ![Generative artwork examples](docs/examples.jpg)
 
 ## Install
