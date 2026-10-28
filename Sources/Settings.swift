@@ -53,6 +53,8 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
     private var web: WKWebView!
     private var settings: Settings
     private var error = ""
+    private var ready = false
+    private var readyActions: [() -> Void] = []
     private let changed: (Settings) -> String?
     private let page = Bundle.main.resourceURL!.appendingPathComponent("desktop/settings.html")
     private static let keys: [String: Int] = ["A":0,"S":1,"D":2,"F":3,"H":4,"G":5,"Z":6,"X":7,"C":8,"V":9,"B":11,"Q":12,"W":13,"E":14,"R":15,"Y":16,"T":17,"1":18,"2":19,"3":20,"4":21,"6":22,"5":23,"9":25,"7":26,"8":28,"0":29,"O":31,"U":32,"I":34,"P":35,"L":37,"J":38,"K":40,"N":45,"M":46,"Space":49,"F1":122,"F2":120,"F3":99,"F4":118,"F5":96,"F6":97,"F7":98,"F8":100,"F9":101,"F10":109,"F11":103,"F12":111,"F13":105,"F14":107,"F15":113,"F16":106,"F17":64,"F18":79,"F19":80,"F20":90]
@@ -115,6 +117,12 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         decisionHandler(navigationAction.request.url?.standardizedFileURL == page.standardizedFileURL ? .allow : .cancel)
     }
+    func whenReady(_ action: @escaping () -> Void) {
+        if ready { action() } else { readyActions.append(action) }
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        ready = true; let actions = readyActions; readyActions = []; actions.forEach { $0() }
+    }
     func verifyUI(completion: @escaping (Bool) -> Void) {
         let script = """
         await document.fonts.ready;
@@ -125,7 +133,12 @@ final class SettingsWindow: NSObject, WKScriptMessageHandler, WKNavigationDelega
         const valid=value.settings.intervalMinutes===15&&value.settings.desktopButtons&&value.settings.shortcut==='Control+Alt+G';
         await wallpapers.update({...initial.settings});return valid;
         """
-        web.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { result in completion((try? result.get() as? Bool) == true) }
+        web.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let value): completion((value as? Bool) == true)
+            case .failure(let error): print("Native settings verification:", error); completion(false)
+            }
+        }
     }
     func capture(to url: URL, completion: @escaping (Bool) -> Void) {
         web.callAsyncJavaScript("await document.fonts.ready;return !!document.querySelector('.selector-face');", arguments: [:], in: nil, in: .page) { [weak self] _ in

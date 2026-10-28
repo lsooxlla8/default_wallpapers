@@ -18,7 +18,7 @@ if let i = arguments.firstIndex(of: "--preview-settings"), arguments.count > i +
     try! FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
     DispatchQueue.main.asyncAfter(deadline: .now() + 30) { print("Settings verification timed out"); exit(1) }
     let preferences = SettingsWindow(Settings()) { _ in nil }; preferences.show()
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+    preferences.whenReady {
         preferences.verifyUI { valid in
             guard valid else { print("Native settings bridge failed"); exit(1) }
             preferences.capture(to: out.appendingPathComponent("settings-macos.png")) { success in exit(success ? 0 : 1) }
