@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const {pathToFileURL} = require('node:url');
 const core = require('../desktop/core.cjs');
 const {applyLinux} = require('../desktop/platform.cjs');
 test('settings preserve explicit manual mode, both controls, and custom export destination', () => {
@@ -44,6 +45,6 @@ test('GNOME applies light and dark URI using argument arrays with escaped paths'
 test('KDE passes separate per-screen images and safely embeds paths in script', async () => {
   let script;
   await applyLinux([{index: 0, primary: true, path: '/tmp/a.png'}, {index: 1, path: '/tmp/b.png'}], {XDG_CURRENT_DESKTOP: 'KDE'}, async (_bin, args) => { script = args.at(-1); return {stdout: ''}; });
-  assert.ok(script.includes('file:///tmp/a.png')); assert.ok(script.includes('file:///tmp/b.png')); assert.ok(script.includes('d.screen'));
+  assert.ok(script.includes(pathToFileURL('/tmp/a.png').href)); assert.ok(script.includes(pathToFileURL('/tmp/b.png').href)); assert.ok(script.includes('d.screen'));
 });
 test('unsupported Linux desktop reports that automatic wallpaper application is unavailable', async () => { await assert.rejects(applyLinux([{path: '/tmp/a.png'}], {XDG_CURRENT_DESKTOP: 'unknown'}), /не поддерживает/); });

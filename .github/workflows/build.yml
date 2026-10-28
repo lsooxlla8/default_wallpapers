@@ -18,6 +18,8 @@ jobs:
       - run: ./scripts/package-mac.sh
       - name: Render simulated displays without changing desktop wallpapers
         run: '"build/Wallpaper Generator.app/Contents/MacOS/Wallpaper Generator" --simulate-screens 1200x800,800x1200,640x360 qa/native 7'
+      - name: Capture final native settings window
+        run: '"build/Wallpaper Generator.app/Contents/MacOS/Wallpaper Generator" --preview-settings qa/native'
       - uses: actions/upload-artifact@v4
         with:
           name: macos-installers
@@ -41,7 +43,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb libasound2t64 libgtk-3-0 libnss3 libgbm1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libasound2t64 libgtk-3-0 libnss3 libgbm1
+          # Isolated CI runner only; packaged applications retain Chromium sandboxing.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - if: runner.os == 'Linux'
         name: Render, settings, buttons and exact photo export replay
         run: xvfb-run -a -s '-screen 0 1600x1100x24' npm run smoke
@@ -63,6 +69,26 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - if: runner.os == 'Linux'
         run: npm run dist:linux
+      - if: runner.os == 'Windows'
+        name: Install EXE silently and verify the installed app
+        shell: powershell
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'wallpaper-installed'
+          $installer = (Get-ChildItem dist/*-setup.exe)[0].FullName
+          $p = Start-Process -FilePath $installer -ArgumentList "/S /D=$destination" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $output = Join-Path $env:RUNNER_TEMP 'wallpaper-installed-qa'
+          $p = Start-Process -FilePath "$destination/Wallpaper Generator.exe" -ArgumentList "--smoke-test --smoke-out $output" -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw 'Installed app verification timed out' }
+          if ($p.ExitCode -ne 0) { throw "Installed app failed: $($p.ExitCode)" }
+          Copy-Item "$output/report.json" qa/installed-report.json
+      - if: runner.os == 'Linux'
+        name: Verify packaged AppImage and DEB
+        run: |
+          dpkg-deb --info dist/*.deb
+          chmod +x dist/*.AppImage
+          xvfb-run -a -s '-screen 0 1600x1100x24' dist/*.AppImage --appimage-extract-and-run --smoke-test --smoke-out "$RUNNER_TEMP/packaged-qa"
+          cp "$RUNNER_TEMP/packaged-qa/report.json" qa/packaged-report.json
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ runner.os }}-installers

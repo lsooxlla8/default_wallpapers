@@ -57,7 +57,7 @@ final class Renderer: NSObject, WKNavigationDelegate {
     private var script = ""
     private var arguments: [String: Any] = [:]
     private var timeout: DispatchWorkItem?
-    func run(_ script: String, arguments: [String: Any], completion: @escaping (Result<Any, Error>) -> Void) {
+    func run(_ script: String, arguments: [String: Any], page: URL? = nil, completion: @escaping (Result<Any, Error>) -> Void) {
         guard self.completion == nil else { completion(.failure(NSError(domain: "Renderer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Рендер уже выполняется"]))); return }
         self.script = script; self.arguments = arguments; self.completion = completion
         let configuration = WKWebViewConfiguration(); configuration.websiteDataStore = .nonPersistent()
@@ -65,7 +65,8 @@ final class Renderer: NSObject, WKNavigationDelegate {
         view.navigationDelegate = self; web = view
         let deadline = DispatchWorkItem { [weak self] in self?.fail("Превышено время ожидания генератора") }
         timeout = deadline; DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: deadline)
-        view.loadFileURL(engineDirectory.appendingPathComponent("index.html"), allowingReadAccessTo: engineDirectory)
+        let file = page ?? engineDirectory.appendingPathComponent("index.html")
+        view.loadFileURL(file, allowingReadAccessTo: file.deletingLastPathComponent())
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.callAsyncJavaScript("for(let i=0;i<500&&!window.Art?.isReady;i++)await new Promise(r=>setTimeout(r,20));if(!window.Art?.isReady)throw Error('Engine not ready');return true;", arguments: [:], in: nil, in: .page) { [weak self] result in
@@ -92,7 +93,7 @@ await DesktopExperiments.setPhotos(photos||[]);
 const out=[];let pal=palette&&palette.length===3?palette:null;
 for(const t of targets){
   Art.resize(t.w,t.h,1);
-  const st=Art.load({seed:t.seed,recent:[],...(pal?{palette:pal}:{})});Art.setVisible(false);
+  const st=Art.load({seed:t.seed,recent:[],...(fixture?{family:DesktopExperiments.catalogue.find(r=>r.source==="photo").id}:{}),...(pal?{palette:pal}:{})});Art.setVisible(false);
   pal=pal||st.palette;const f=Art.stillFrame(t.w,t.h);
   out.push({id:t.id,png:f.png,record:Art.metadata(),palette:pal});
 }
@@ -151,6 +152,7 @@ final class Generator: NSObject, NSMenuDelegate {
     @objc func showSettings() {
         if preferences == nil { preferences = SettingsWindow(settings) { [weak self] value in
             guard let self else { return nil }
+            if value.photoSource == "folder" && !value.photoFolder.hasPrefix("/") { return "Выберите папку фотографий" }
             if !self.hotkey.register(value) { _ = self.hotkey.register(self.settings); return "Шорткат занят. Настройки не сохранены: выберите другую комбинацию." }
             do { try value.write(); self.settings = value; self.schedule(); self.rebuildControls(); return nil }
             catch { _ = self.hotkey.register(self.settings); return error.localizedDescription }
@@ -174,7 +176,7 @@ final class Generator: NSObject, NSMenuDelegate {
     }
     private func render(_ targets: [Target], base: UInt32, palette: [String]?, keep: [Work], photos: [[String: String]]) {
         let list = targets.map { ["id": $0.id, "w": Int($0.size.width), "h": Int($0.size.height), "seed": Int(seedFor(base: base, id: $0.id))] as [String: Any] }
-        renderer.run(generationScript, arguments: ["targets": list, "palette": palette ?? [], "photos": photos]) { [weak self] result in
+        renderer.run(generationScript, arguments: ["targets": list, "palette": palette ?? [], "photos": photos, "fixture": false]) { [weak self] result in
             guard let self else { return }
             defer { self.busy = false; self.controls.setEnabled(true) }
             do {

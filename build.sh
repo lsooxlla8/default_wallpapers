@@ -13,6 +13,7 @@ for arch in arm64 x86_64; do
 done
 lipo -create "$tmp/gen-arm64" "$tmp/gen-x86_64" -output "$app/Contents/MacOS/Wallpaper Generator"
 ditto "$root/art" "$app/Contents/Resources/art"
+cp "$root/assets/icon.png" "$app/Contents/Resources/fixture.png"
 /usr/bin/python3 - "$app" "$version" <<'PY'
 import plistlib,sys,pathlib
 app=pathlib.Path(sys.argv[1])
